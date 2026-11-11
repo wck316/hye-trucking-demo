@@ -157,6 +157,19 @@ h1,h2,h3,p { margin: 0; }
 .preview-table tr + tr td,.preview-table tbody { border-top: 1px solid var(--line); }
 .preview-table td:last-child { font-weight: 800; color: #0a4dd0; }
 .preview-table .ico { margin-right: 6px; }
+.carriers { background: #fff; border-bottom: 1px solid var(--line); padding-block: clamp(40px,4.3vw,64px); }
+.carriers .wrap { text-align: center; }
+.carrier-viewport { margin-top: 24px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; scrollbar-color: #b4c4d7 #f6f8fb; border-block: 1px solid #e5ebf2; background: radial-gradient(ellipse at center,#fff 4%,#f4f7fb 100%); }
+.carrier-viewport:focus-visible { outline-offset: 2px; }
+.carrier-viewport.is-rolling { overflow: hidden; scroll-snap-type: none; mask-image: linear-gradient(90deg,transparent,#000 9%,#000 91%,transparent); }
+.carrier-track { display: flex; width: max-content; margin: 0; padding: 0; list-style: none; }
+.carrier-card { flex: none; width: clamp(152px,16vw,218px); padding: 25px 14px 20px; scroll-snap-align: start; }
+.carrier-mark { display: grid; grid-template-rows: 76px minmax(2.6em,auto); align-items: center; justify-items: center; }
+.carrier-mark img { width: min(100%,154px); height: 100%; object-fit: contain; }
+.carrier-card h3 { color: var(--ink); font-size: 13px; font-weight: 650; line-height: 1.35; }
+.carrier-copy { display: none; }
+.is-rolling .carrier-copy { display: block; }
+.is-rolling .carrier-mark { transform: perspective(600px) rotateY(var(--carrier-angle,0deg)) scale(var(--carrier-scale,.68)); opacity: var(--carrier-opacity,.25); filter: blur(var(--carrier-blur,1.7px)); }
 .trust-grid { display: grid; grid-template-columns: 1fr 1.19fr; align-items: start; gap: clamp(32px,4vw,64px); }
 .values { font-size: 15px; font-weight: 740; margin: 15px 0 18px; }
 .values span { color: #0a52df; margin-inline: 4px; }
@@ -270,6 +283,10 @@ h1,h2,h3,p { margin: 0; }
   .benefit-grid p br { display: none; }
   .service-grid,.solution-layout,.trust-grid { grid-template-columns: 1fr; }
   .solution-layout,.trust-grid { gap: 20px; }
+  .carrier-viewport { margin-top: 16px; }
+  .carrier-card { width: clamp(100px,33vw,146px); padding: 22px 9px 16px; }
+  .carrier-mark { grid-template-rows: 58px minmax(2.6em,auto); }
+  .carrier-card h3 { font-size: 12px; }
   .solution-tabs button { min-height: 49px; font-size: 16px; gap: 13px; }
   .section-intro { font-size: 15px; }
   .platform .buttons .btn { padding-inline: 13px; }
@@ -398,6 +415,154 @@ h1,h2,h3,p { margin: 0; }
       </div>
     </div>
   </section>
+  <section id="carriers" class="section carriers" aria-labelledby="carriers-title">
+    <div class="wrap">
+      <h2 id="carriers-title" class="section-title">合作承运商</h2>
+      <p class="section-intro">实际可选承运商以运输线路和货物需求为准。</p>
+      <div id="carrier-viewport" class="carrier-viewport" tabindex="0" role="group" aria-label="承运商列表">
+        <ul class="carrier-track" role="list">
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/FXFE.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">FedEx Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/EXLA.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Estes Express Lines</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/XPOL.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">XPO</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/SAIA.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Saia LTL Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/ODFL.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Old Dominion Freight Line</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/TFIN.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">TForce Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/PYLE.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">A. Duie Pyle</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/AACT.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">AAA Cooper Transportation</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/ABFS.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">ABF Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/BTVP.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Best Overnite Express</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/CTII.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Central Transport</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/DBDE.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Double D Express</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/EDXI.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">EDI Express</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/FWDN.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Forward Air</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/FCSY.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Frontline Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/JLEI.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Lee Jennings Target Express</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/MHPG.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Mothership</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/RLCA.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">R+L Carriers</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/RDFS.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Roadrunner Freight</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/SEFL.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Southeastern Freight Lines</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/STGL.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">STG Logistics</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/CSTM.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">The Custom Companies</h3>
+            </div>
+          </li>
+          <li class="carrier-card">
+            <div class="carrier-mark">
+              <img src="assets/carriers/TOTL.png" alt="" width="400" height="200" loading="lazy" decoding="async">
+              <h3 lang="en">Total Transportation &amp; Distribution</h3>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
   <section class="section trust" aria-label="集团背景与帮助中心">
     <div class="wrap trust-grid">
       <div id="about">
@@ -430,6 +595,94 @@ h1,h2,h3,p { margin: 0; }
 </dialog>
 <script>
 'use strict';
+
+{
+  const viewport = document.querySelector('#carrier-viewport');
+  const track = viewport.querySelector('.carrier-track');
+  const originals = Array.from(track.children);
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+
+  // The second copy fills the viewport as the first list wraps back to its start.
+  for (const carrier of originals) {
+    const copy = carrier.cloneNode(true);
+    copy.classList.add('carrier-copy');
+    copy.setAttribute('aria-hidden', 'true');
+    track.append(copy);
+  }
+  const marks = Array.from(track.querySelectorAll('.carrier-mark'));
+  let stride = 0;
+  let width = 0;
+  let offset = 0;
+  let inView = false;
+  let frame;
+  let lastTime;
+
+  function paint() {
+    if (!stride || !width) return;
+    track.style.transform = 'translate3d(' + -offset + 'px, 0, 0)';
+    const center = width / 2;
+    const first = Math.floor(offset / stride);
+    const end = Math.ceil((offset + width) / stride);
+
+    for (let index = first; index < end; index++) {
+      const relativeCenter = ((index + 0.5) * stride - offset - center) / center;
+      const distance = Math.max(-1, Math.min(1, relativeCenter));
+      const focus = Math.cos(distance * Math.PI / 2) ** 2;
+      const style = marks[index].style;
+      style.setProperty('--carrier-scale', (0.68 + 0.54 * focus).toFixed(3));
+      style.setProperty('--carrier-opacity', (0.25 + 0.75 * focus).toFixed(3));
+      style.setProperty('--carrier-blur', ((1 - focus) * 1.7).toFixed(2) + 'px');
+      style.setProperty('--carrier-angle', (-18 * distance).toFixed(2) + 'deg');
+    }
+  }
+
+  function measure() {
+    const nextStride = originals[0].getBoundingClientRect().width;
+    width = viewport.clientWidth;
+    const centerIndex = Math.ceil(width / (2 * nextStride) - 0.5);
+    offset = stride ? offset * nextStride / stride : (centerIndex + 0.5) * nextStride - width / 2;
+    stride = nextStride;
+    if (!motion.matches) paint();
+  }
+
+  function animate(time) {
+    const elapsed = Math.min(time - (lastTime ?? time), 50);
+    offset = (offset + elapsed * stride / 3600) % (originals.length * stride);
+    lastTime = time;
+    paint();
+    frame = requestAnimationFrame(animate);
+  }
+
+  function updatePlayback() {
+    const rolling = !motion.matches;
+    viewport.classList.toggle('is-rolling', rolling);
+    viewport.tabIndex = rolling ? -1 : 0;
+    if (rolling) {
+      viewport.scrollLeft = 0;
+      paint();
+    } else {
+      track.style.transform = '';
+    }
+    if (rolling && inView && !document.hidden) {
+      if (frame === undefined) frame = requestAnimationFrame(animate);
+    } else {
+      cancelAnimationFrame(frame);
+      frame = undefined;
+      lastTime = undefined;
+    }
+  }
+
+  measure();
+  updatePlayback();
+  new ResizeObserver(measure).observe(viewport);
+  const visibility = new IntersectionObserver(([entry]) => {
+    inView = entry.isIntersecting;
+    updatePlayback();
+  });
+  visibility.observe(viewport);
+  motion.addEventListener('change', updatePlayback);
+  document.addEventListener('visibilitychange', updatePlayback);
+}
 
 const dialog = document.querySelector('#modal');
 const modalTitle = document.querySelector('#modal-title');
