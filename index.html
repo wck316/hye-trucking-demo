@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#08192a">
 <title>环洋卡派 HYE Trucking | 北美零担、整车与本地配送</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e56ef'/%3E%3Cpath d='M19 16h8v12h10V16h8v32h-8V36H27v12h-8z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./assets/leaflet/leaflet.css">
 <style>
 :root {
   color-scheme: light;
@@ -214,6 +215,19 @@ h1,h2,h3,p { margin: 0; }
 .accessories input { accent-color: var(--blue); }
 .form-message { color: #a52822; font-size: 14px; margin-top: 9px; }
 .form-message:empty { display: none; }
+.quote-layout { display: grid; gap: 20px; }
+.quote-layout > * { min-width: 0; }
+.quote-preview { display: grid; align-content: start; gap: 7px; }
+.quote-preview h3 { font-size: 16px; }
+.quote-preview p { color: var(--muted); font-size: 13px; }
+.quote-map { height: 250px; isolation: isolate; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #eaf1f9; }
+.quote-map-pin { display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; background: #0e56ef; color: #fff; font: 700 12px/1 system-ui,sans-serif; box-shadow: 0 1px 4px #06152266; }
+.quote-map-pin.destination { background: #087564; }
+@media (min-width: 900px) {
+  .modal:has(.quote-layout) { width: min(1000px,calc(100% - 32px)); }
+  .quote-layout { grid-template-columns: minmax(0,1.12fr) minmax(0,1fr); gap: 26px; }
+  .quote-map { height: 320px; }
+}
 .detail-points { margin: 0; padding-left: 22px; color: #293d52; }
 .detail-points li + li { margin-top: 6px; }
 .route-summary { margin-bottom: 13px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
@@ -593,6 +607,7 @@ h1,h2,h3,p { margin: 0; }
   <div class="modal-head"><div><p class="section-en" id="modal-label"></p><h2 id="modal-title" tabindex="-1"></h2></div><button type="button" class="icon-btn" data-close aria-label="关闭弹窗"><svg class="ico" aria-hidden="true"><use href="#close"/></svg></button></div>
   <div class="modal-body" id="modal-body"></div>
 </dialog>
+<script src="./assets/leaflet/leaflet.js"></script>
 <script>
 'use strict';
 
@@ -768,7 +783,10 @@ addEventListener('hashchange', highlightNav);
 highlightNav();
 
 let returnFocus;
+let quoteMap;
 function showModal(label, title, content) {
+  quoteMap?.map.remove();
+  quoteMap = undefined;
   if (!dialog.open) {
     returnFocus = document.activeElement;
     if (menu.classList.contains('is-open')) {
@@ -783,7 +801,12 @@ function showModal(label, title, content) {
   dialog.scrollTop = 0;
   modalTitle.focus({ preventScroll: true });
 }
-dialog.addEventListener('close', () => returnFocus?.focus({ preventScroll: true }));
+dialog.addEventListener('close', () => {
+  if (dialog.open) return;
+  quoteMap?.map.remove();
+  quoteMap = undefined;
+  returnFocus?.focus({ preventScroll: true });
+});
 dialog.addEventListener('click', event => {
   if (event.target !== dialog) return;
   const bounds = dialog.getBoundingClientRect();
@@ -810,7 +833,7 @@ function showQuote(mode = 'LTL', options = [], existing) {
     '<label><input type="checkbox" name="addOn" value="' + value + '"' + (values.addOns.includes(value) ? ' checked' : '') + '> ' + value + '</label>').join('');
   showModal('HYE TMS · 询价演示', '获取运输报价',
     '<p class="modal-lead">使用美国邮编和货物信息体验比价。报价和时效均为模拟数据。</p>' +
-    '<form id="quote-form"><div class="form-grid">' +
+    '<div class="quote-layout"><form id="quote-form"><div class="form-grid">' +
     '<label class="full">运输方式<select name="mode" required>' + modeOptions + '</select></label>' +
     '<label>起运地邮编<input name="origin" required inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="例如 90001" value="' + escapeHtml(values.origin) + '"></label>' +
     '<label>目的地邮编<input name="destination" required inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="例如 60601" value="' + escapeHtml(values.destination) + '"></label>' +
@@ -818,7 +841,102 @@ function showQuote(mode = 'LTL', options = [], existing) {
     '<label>货物总重 (lb)<input name="weight" type="number" required min="1" max="80000" step="1" placeholder="例如 800" value="' + escapeHtml(values.weight) + '"></label>' +
     '</div><fieldset class="accessories"><legend>附加服务（可选）</legend>' + addOnInputs + '</fieldset>' +
     '<p class="form-message" role="alert"></p><div class="buttons"><button type="submit" class="btn primary">查看示例报价' + icon('arrow') +
-    '</button><button type="button" class="btn outline" data-sample>填入示例</button></div></form>');
+    '</button><button type="button" class="btn outline" data-sample>填入示例</button></div></form>' +
+    '<section class="quote-preview" aria-labelledby="quote-map-title"><h3 id="quote-map-title">路线预览</h3>' +
+    '<p id="quote-map-status" role="status">输入邮编后可在地图上查看起运地和目的地。</p>' +
+    '<div class="quote-map" role="region" aria-labelledby="quote-map-title"></div>' +
+    '<p>地图使用邮编区域的参考点，虚线为两地直线示意。</p>' +
+    '<p class="quote-map-tile-status" role="status" hidden></p></section></div>');
+  const form = modalBody.querySelector('#quote-form');
+  mountQuoteMap();
+  updateQuoteMap(form);
+}
+
+const usMapBounds = [[24, -126], [50, -66]];
+let zipLocations;
+function loadZipLocations() {
+  // Representative coordinates from the U.S. Census Bureau's 2026 ZCTA Gazetteer.
+  // https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.2026.html
+  zipLocations ??= fetch('./assets/us-zip-locations.json').then(response => {
+    if (!response.ok) throw new Error('ZIP location data unavailable');
+    return response.json();
+  }).catch(error => {
+    zipLocations = undefined;
+    throw error;
+  });
+  return zipLocations;
+}
+
+function mountQuoteMap() {
+  const node = modalBody.querySelector('.quote-map');
+  const status = modalBody.querySelector('#quote-map-status');
+  if (!window.L) {
+    status.textContent = '地图暂时无法加载。';
+    node.hidden = true;
+    return;
+  }
+  const map = L.map(node, { scrollWheelZoom: false, zoomSnap: 0.5, zoomAnimation: false });
+  map.fitBounds(usMapBounds);
+  const tileStatus = modalBody.querySelector('.quote-map-tile-status');
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  });
+  tiles.on('tileerror', () => {
+    tileStatus.textContent = '部分地图底图暂时无法加载。';
+    tileStatus.hidden = false;
+  });
+  tiles.on('loading', () => { tileStatus.hidden = true; });
+  tiles.addTo(map);
+  quoteMap = { map, status, pins: L.layerGroup().addTo(map), revision: 0 };
+}
+
+async function updateQuoteMap(form) {
+  const preview = quoteMap;
+  if (!preview) return;
+  const revision = ++preview.revision;
+  const { map, status, pins } = preview;
+  const endpoints = [
+    { zip: form.elements.origin.value, label: '起运地', letter: 'A', style: 'origin' },
+    { zip: form.elements.destination.value, label: '目的地', letter: 'B', style: 'destination' }
+  ].filter(endpoint => /^[0-9]{5}$/.test(endpoint.zip));
+  pins.clearLayers();
+  if (!endpoints.length) {
+    map.fitBounds(usMapBounds, { animate: false });
+    status.textContent = '输入邮编后可在地图上查看起运地和目的地。';
+    return;
+  }
+
+  status.textContent = '正在定位邮编…';
+  const locations = await loadZipLocations().catch(() => null);
+  if (quoteMap !== preview || preview.revision !== revision || !dialog.open) return;
+  if (!locations) {
+    status.textContent = '邮编位置暂时无法加载。';
+    return;
+  }
+
+  const found = endpoints.filter(endpoint => Object.hasOwn(locations, endpoint.zip));
+  const missing = endpoints.filter(endpoint => !Object.hasOwn(locations, endpoint.zip));
+  const points = found.map(endpoint => locations[endpoint.zip]);
+  const samePoint = points.length === 2 && L.latLng(points[0]).equals(points[1]);
+  if (points.length === 2 && !samePoint) {
+    L.polyline(points, { color: '#0e56ef', weight: 3, dashArray: '6 6', interactive: false }).addTo(pins);
+  }
+  for (const [index, endpoint] of found.entries()) {
+    if (samePoint && index === 1) break;
+    const title = (samePoint ? '起运地与目的地' : endpoint.label) + ' ' + endpoint.zip;
+    const pin = L.divIcon({
+      className: 'quote-map-pin ' + endpoint.style,
+      html: samePoint ? 'A/B' : endpoint.letter,
+      iconSize: [26, 26]
+    });
+    L.marker(points[index], { icon: pin, title }).bindTooltip(title).addTo(pins);
+  }
+  if (points.length) map.fitBounds(points, { padding: [32, 32], maxZoom: 11, animate: false });
+  else map.fitBounds(usMapBounds, { animate: false });
+  const summary = found.map(endpoint => endpoint.letter + ' ' + endpoint.label + ' ' + endpoint.zip).join(' · ');
+  const unavailable = missing.map(endpoint => endpoint.label + ' ' + endpoint.zip).join('、');
+  status.textContent = [summary, unavailable && '暂无位置：' + unavailable].filter(Boolean).join('。');
 }
 
 const channels = ['标准渠道', '优先渠道', '加急渠道'];
@@ -935,6 +1053,7 @@ document.addEventListener('click', event => {
     form.elements.pallets.value = mode === 'FTL' ? '20' : '2';
     form.elements.weight.value = mode === 'FTL' ? '3800' : '800';
     form.querySelector('.form-message').textContent = '';
+    updateQuoteMap(form);
   } else if (data.edit !== undefined) showQuote(draft.mode, [], draft);
   else if (data.rates !== undefined) showRates();
   else if (data.rate !== undefined) showReview(Number(data.rate));
@@ -954,7 +1073,10 @@ document.addEventListener('click', event => {
 });
 
 modalBody.addEventListener('input', event => {
-  if (event.target.form?.id === 'quote-form') event.target.form.querySelector('.form-message').textContent = '';
+  const form = event.target.form;
+  if (form?.id !== 'quote-form') return;
+  form.querySelector('.form-message').textContent = '';
+  if (event.target.name === 'origin' || event.target.name === 'destination') updateQuoteMap(form);
 });
 modalBody.addEventListener('submit', event => {
   if (event.target.id !== 'quote-form') return;
