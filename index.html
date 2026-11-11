@@ -220,6 +220,12 @@ h1,h2,h3,p { margin: 0; }
 .quote-preview { display: grid; align-content: start; gap: 7px; }
 .quote-preview h3 { font-size: 16px; }
 .quote-preview p { color: var(--muted); font-size: 13px; }
+.quote-mileage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.quote-mileage .btn { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+.quote-mileage .btn:disabled { color: var(--muted); background: var(--surface); border-color: var(--line); cursor: default; }
+.quote-mileage p { color: var(--ink); font-weight: 650; }
+.quote-mileage p:empty { display: none; }
+.quote-preview .route-credit a { text-decoration: underline; text-underline-offset: 2px; }
 .quote-map { height: 250px; isolation: isolate; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #eaf1f9; }
 .quote-map-pin { display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; background: #0e56ef; color: #fff; font: 700 12px/1 system-ui,sans-serif; box-shadow: 0 1px 4px #06152266; }
 .quote-map-pin.destination { background: #087564; }
@@ -608,6 +614,7 @@ h1,h2,h3,p { margin: 0; }
   <div class="modal-body" id="modal-body"></div>
 </dialog>
 <script src="./assets/leaflet/leaflet.js"></script>
+<script src="./assets/leaflet-routing-machine/leaflet-routing-machine.min.js"></script>
 <script>
 'use strict';
 
@@ -844,8 +851,12 @@ function showQuote(mode = 'LTL', options = [], existing) {
     '</button><button type="button" class="btn outline" data-sample>填入示例</button></div></form>' +
     '<section class="quote-preview" aria-labelledby="quote-map-title"><h3 id="quote-map-title">路线预览</h3>' +
     '<p id="quote-map-status" role="status">输入邮编后可在地图上查看起运地和目的地。</p>' +
+    '<div class="quote-mileage"><button type="button" class="btn outline" data-mileage disabled>计算公路里程</button>' +
+    '<p id="quote-mileage-status" role="status"></p></div>' +
     '<div class="quote-map" role="region" aria-labelledby="quote-map-title"></div>' +
-    '<p>地图使用邮编区域的参考点，虚线为两地直线示意。</p>' +
+    '<p>里程按邮编参考点及普通车辆路线估算。虚线为直线示意。</p>' +
+    '<p class="route-credit"><a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener noreferrer">路线服务：FOSSGIS / OSRM</a> · ' +
+    '<a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener noreferrer">报告地图问题</a></p>' +
     '<p class="quote-map-tile-status" role="status" hidden></p></section></div>');
   const form = modalBody.querySelector('#quote-form');
   mountQuoteMap();
@@ -853,6 +864,16 @@ function showQuote(mode = 'LTL', options = [], existing) {
 }
 
 const usMapBounds = [[24, -126], [50, -66]];
+const mileageNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 });
+const QuoteRoadRouter = window.L?.Routing?.OSRMv1?.extend({
+  buildRouteUrl(waypoints) {
+    // A single route with simplified geometry is enough for the mileage preview.
+    const coordinates = waypoints.map(({ latLng }) => latLng.lng + ',' + latLng.lat).join(';');
+    return this.options.serviceUrl + '/' + this.options.profile + '/' + coordinates +
+      '?overview=simplified&alternatives=false&steps=false&generate_hints=false';
+  }
+});
+let nextRouteRequestAt = 0;
 let zipLocations;
 function loadZipLocations() {
   // Representative coordinates from the U.S. Census Bureau's 2026 ZCTA Gazetteer.
@@ -888,14 +909,24 @@ function mountQuoteMap() {
   });
   tiles.on('loading', () => { tileStatus.hidden = true; });
   tiles.addTo(map);
-  quoteMap = { map, status, pins: L.layerGroup().addTo(map), revision: 0 };
+  quoteMap = {
+    map, status, pins: L.layerGroup().addTo(map), revision: 0,
+    mileageButton: modalBody.querySelector('[data-mileage]'),
+    mileageStatus: modalBody.querySelector('#quote-mileage-status'),
+    routeLine: L.polyline([], { color: '#0e56ef', weight: 3, interactive: false }).addTo(map),
+    routePoints: []
+  };
 }
 
 async function updateQuoteMap(form) {
   const preview = quoteMap;
   if (!preview) return;
   const revision = ++preview.revision;
-  const { map, status, pins } = preview;
+  const { map, status, pins, routeLine, mileageButton, mileageStatus } = preview;
+  preview.routePoints = [];
+  routeLine.setLatLngs([]);
+  mileageButton.disabled = true;
+  mileageStatus.textContent = QuoteRoadRouter ? '' : '公路里程功能暂时无法加载。';
   const endpoints = [
     { zip: form.elements.origin.value, label: '起运地', letter: 'A', style: 'origin' },
     { zip: form.elements.destination.value, label: '目的地', letter: 'B', style: 'destination' }
@@ -920,7 +951,11 @@ async function updateQuoteMap(form) {
   const points = found.map(endpoint => locations[endpoint.zip]);
   const samePoint = points.length === 2 && L.latLng(points[0]).equals(points[1]);
   if (points.length === 2 && !samePoint) {
-    L.polyline(points, { color: '#0e56ef', weight: 3, dashArray: '6 6', interactive: false }).addTo(pins);
+    routeLine.setLatLngs(points).setStyle({ dashArray: '6 6', weight: 3 });
+    preview.routePoints = points;
+    mileageButton.disabled = !QuoteRoadRouter;
+  } else if (samePoint) {
+    mileageStatus.textContent = '两个邮编参考点重合，需具体地址才能估算里程。';
   }
   for (const [index, endpoint] of found.entries()) {
     if (samePoint && index === 1) break;
@@ -937,6 +972,38 @@ async function updateQuoteMap(form) {
   const summary = found.map(endpoint => endpoint.letter + ' ' + endpoint.label + ' ' + endpoint.zip).join(' · ');
   const unavailable = missing.map(endpoint => endpoint.label + ' ' + endpoint.zip).join('、');
   status.textContent = [summary, unavailable && '暂无位置：' + unavailable].filter(Boolean).join('。');
+}
+
+function calculateQuoteMileage() {
+  const preview = quoteMap;
+  if (!preview || preview.mileageButton.disabled) return;
+  const { revision, routePoints, mileageButton, mileageStatus, routeLine, map } = preview;
+  if (Date.now() < nextRouteRequestAt) {
+    mileageStatus.textContent = '请稍等一秒再计算。';
+    return;
+  }
+  nextRouteRequestAt = Date.now() + 1000;
+  mileageButton.disabled = true;
+  mileageStatus.textContent = '正在计算公路里程…';
+  const router = new QuoteRoadRouter({
+    serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1',
+    profile: 'driving', useHints: false, timeout: 12000
+  });
+  const waypoints = routePoints.map(point => L.Routing.waypoint(L.latLng(point)));
+  router.route(waypoints, (error, routes) => {
+    if (quoteMap !== preview || revision !== preview.revision || !dialog.open) return;
+    const route = routes?.[0];
+    const meters = route?.summary.totalDistance;
+    if (error || !Number.isFinite(meters) || meters <= 0 || route.coordinates.length < 2) {
+      mileageButton.disabled = false;
+      mileageStatus.textContent = '暂未找到可用公路路线，请核对邮编或稍后重试。';
+      return;
+    }
+    routeLine.setLatLngs(route.coordinates).setStyle({ dashArray: null, weight: 4 });
+    map.fitBounds(L.latLngBounds(routePoints).extend(routeLine.getBounds()), { padding: [32, 32], maxZoom: 11, animate: false });
+    mileageStatus.textContent = '约 ' + mileageNumber.format(meters / 1609.344) + ' 英里（' +
+      mileageNumber.format(meters / 1000) + ' 公里）';
+  });
 }
 
 const channels = ['标准渠道', '优先渠道', '加急渠道'];
@@ -1054,7 +1121,8 @@ document.addEventListener('click', event => {
     form.elements.weight.value = mode === 'FTL' ? '3800' : '800';
     form.querySelector('.form-message').textContent = '';
     updateQuoteMap(form);
-  } else if (data.edit !== undefined) showQuote(draft.mode, [], draft);
+  } else if (data.mileage !== undefined) calculateQuoteMileage();
+  else if (data.edit !== undefined) showQuote(draft.mode, [], draft);
   else if (data.rates !== undefined) showRates();
   else if (data.rate !== undefined) showReview(Number(data.rate));
   else if (data.book !== undefined) createOrder(Number(data.book));
