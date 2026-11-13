@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a28">
+  <title>HYE OMS | 环洋卡派客户门户</title>
+  <link rel="stylesheet" href="oms.css?v=tickets">
+  <script type="module" src="app.js?v=tickets"></script>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" class="symbols" aria-hidden="true">
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="order" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4v10l-9 4-9-4V7Zm0 0 9 4 9-4m-9 4v10m-5-16 9 4"/></symbol>
+    <symbol id="ticket" viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Zm8 3v1m0 2.5v1m0 2.5v1"/></symbol>
+    <symbol id="truck" viewBox="0 0 24 24"><path d="M6 17H3V6h12v11H9m6-8h4l3 4v4h-3m-4 0h1"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></symbol>
+    <symbol id="bill" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6m-6 4h6m-6 4h4"/></symbol>
+    <symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2H4Z"/></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/></symbol>
+    <symbol id="book" viewBox="0 0 24 24"><rect x="6" y="3" width="13" height="18" rx="2"/><path d="M4 7h4m-4 5h4m-4 5h4m3-7h4m-4 4h4"/></symbol>
+    <symbol id="arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
+    <symbol id="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12m0-12L6 18"/></symbol>
+    <symbol id="menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  </svg>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#quote" aria-label="HYE OMS · LTL 零担"><span>HYE <strong>OMS</strong></span><small>环洋卡派</small></a>
+      <nav class="navigation" aria-label="客户门户导航">
+        <a href="#quote" data-nav="quote"><svg class="icon" aria-hidden="true"><use href="#plus"/></svg>LTL 零担</a>
+        <a href="#ftl" data-nav="ftl"><svg class="icon" aria-hidden="true"><use href="#truck"/></svg>FTL 整车</a>
+        <a href="#custom" data-nav="custom"><svg class="icon" aria-hidden="true"><use href="#book"/></svg>定制询价</a>
+        <a href="#orders" data-nav="orders"><svg class="icon" aria-hidden="true"><use href="#order"/></svg>订单管理</a>
+        <a href="#tickets" data-nav="tickets"><svg class="icon" aria-hidden="true"><use href="#ticket"/></svg>工单管理</a>
+        <a href="#billing" data-nav="billing"><svg class="icon" aria-hidden="true"><use href="#bill"/></svg>账单管理</a>
+      </nav>
+      <section class="recent" aria-labelledby="recent-heading">
+        <h2 id="recent-heading">最近报价</h2>
+        <ul id="recent-quotes"></ul>
+      </section>
+      <a class="sidebar-account" href="#account" data-nav="account" aria-label="账号管理" title="账号管理">
+        <span class="avatar"><svg class="icon" aria-hidden="true"><use href="#user"/></svg></span>
+        <span class="account-label"><strong id="sidebar-contact">演示客户</strong><small id="sidebar-email">shipping@example.com</small></span>
+        <svg class="icon account-chevron" aria-hidden="true"><use href="#chev"/></svg>
+      </a>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-context">
+          <button type="button" class="icon-button mobile-menu" id="menu-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#menu"/></svg></button>
+          <div id="breadcrumb" class="breadcrumb">LTL 零担</div>
+          <span class="portal-label">HYE Trucking 客户门户</span>
+        </div>
+        <div class="topbar-actions">
+          <div id="workflow-action" hidden></div>
+          <a class="link" href="../">返回官网</a>
+          <span class="demo-label">演示环境</span>
+        </div>
+      </header>
+      <button type="button" id="nav-shade" class="nav-shade" tabindex="-1" aria-label="关闭导航" hidden></button>
+      <main id="workspace" class="page"></main>
+    </div>
+  </div>
+  <dialog id="dialog" class="dialog" aria-labelledby="dialog-title"></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <noscript>请启用 JavaScript 以使用 HYE OMS 演示。</noscript>
+</body>
+</html>
