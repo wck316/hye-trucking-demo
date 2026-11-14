@@ -1,18 +1,21 @@
+const liftgateHelp = '现场没有装卸平台或叉车，需要用车尾升降平台在地面和车厢之间装卸货物。';
+const limitedAccessHelp = '车辆进出受限或需要登记通行，例如工地、学校和军事基地。';
+
 export const serviceOptions = {
   origin: [
-    { id: 'liftgate', label: '尾板', fee: 6500 },
-    { id: 'inside', label: '室内提货', fee: 8500 },
-    { id: 'limited', label: '限制进入', fee: 6000 },
-    { id: 'cfs', label: '集装箱货运站', fee: 7000 },
-    { id: 'tradeshow', label: '展会', fee: 9000 }
+    { id: 'liftgate', label: '尾板', fee: 6500, description: liftgateHelp },
+    { id: 'inside', label: '室内提货', fee: 8500, description: '货物在建筑物内，需要司机进入指定位置提货。' },
+    { id: 'limited', label: '限制进入', fee: 6000, description: limitedAccessHelp },
+    { id: 'cfs', label: '集装箱货运站', fee: 7000, description: '提货地点是集装箱货运站（CFS），例如海运拼箱拆箱后提取货物。' },
+    { id: 'tradeshow', label: '展会', fee: 9000, description: '从展馆或会展中心提货，现场可能设有专用装卸区或指定提货时段。' }
   ],
   destination: [
-    { id: 'liftgate', label: '尾板', fee: 6500 },
-    { id: 'inside', label: '室内送货', fee: 8500 },
-    { id: 'limited', label: '限制进入', fee: 6000 },
-    { id: 'appointment', label: '预约送货', fee: 4500 },
-    { id: 'notify', label: '到货前通知', fee: 2000 },
-    { id: 'amazon', label: '亚马逊预约', fee: 6500 }
+    { id: 'liftgate', label: '尾板', fee: 6500, description: liftgateHelp },
+    { id: 'inside', label: '室内送货', fee: 8500, description: '需要司机把货物送到建筑物内的指定交接位置。' },
+    { id: 'limited', label: '限制进入', fee: 6000, description: limitedAccessHelp },
+    { id: 'appointment', label: '预约送货', fee: 4500, description: '收货方要求提前约定送货日期或时间窗口。' },
+    { id: 'notify', label: '到货前通知', fee: 2000, description: '请承运商在到达前联系收货人，方便提前安排接货。' },
+    { id: 'amazon', label: '亚马逊预约', fee: 6500, description: '送往亚马逊运营中心时，需要通过 Carrier Central 申请送货预约。' }
   ]
 };
 export const addressTypes = {
@@ -60,21 +63,45 @@ const hazardIdFormat = new RegExp('^' + hazardIdPattern + '$');
 export const orderStatuses = {
   ready: '待提货', picked: '已提货', transit: '运输中', delivered: '已签收'
 };
+export const orderTypes = { ltl: 'LTL', ftl: 'FTL', custom: '定制服务' };
+export const orderType = order => order.shipment.mode === 'custom' ? 'custom' : shipmentMode(order.shipment);
+export const orderRoute = kind => kind === 'ltl' ? '#orders' : '#orders/' + kind;
+export const orderRecordHref = (kind, record) => orderRoute(kind) + '/' + record.id;
 export const billStatuses = { pending: '待出账', due: '待支付', paid: '已支付' };
 export const ticketStatuses = { pending: '待处理', processing: '处理中', closed: '已关闭' };
 export const ticketCategories = {
   tracking: '运输跟踪', stops: '提送货问题', billing: '账单费用', documents: '文件与回单', damage: '货损理赔', other: '其他'
 };
+export const caseTypes = {
+  tickets: { label: '普通工单', action: '创建工单', prefix: 'TK-' },
+  disputes: { label: '账单申诉', action: '发起申诉', prefix: 'BD-' },
+  claims: { label: '运输索赔', action: '发起索赔', prefix: 'CL-' }
+};
+export const disputeReasons = { amount: '费用金额有误', service: '未使用该服务', duplicate: '重复收费', other: '其他费用问题' };
+export const claimReasons = { damage: '货损', shortage: '短少', loss: '丢失' };
+export const caseKind = ticket => ticket.kind ?? 'tickets';
+export const caseRoute = kind => kind === 'tickets' ? '#tickets' : '#tickets/' + kind;
+export const caseHref = ticket => caseRoute(caseKind(ticket)) + '/' + ticket.id;
+export function caseCategory(ticket) {
+  const kind = caseKind(ticket);
+  const categories = kind === 'claims' ? claimReasons : kind === 'disputes' ? disputeReasons : ticketCategories;
+  return Object.hasOwn(categories, ticket.category) ? categories[ticket.category] : '';
+}
+export function latestCase(tickets, kind, value) {
+  const key = kind === 'disputes' ? 'billId' : 'orderId';
+  return tickets.find(ticket => caseKind(ticket) === kind && ticket[key] === value && ticket.status !== 'closed')
+    ?? tickets.find(ticket => caseKind(ticket) === kind && ticket[key] === value);
+}
 export const orderDocuments = { bol: ['BOL', '提单'], label: ['Label', '货运标签'], invoice: ['Invoice', '账单'] };
 export const money = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
-export const postalCode = value => value.match(/\b(\d{5})(?:-\d{4})?(?:,\s*(?:US|USA))?\s*$/i)?.[1] ?? '';
+export const postalCode = value => value.match(/\b(\d{5})(?:-\d{4})?(?:(?:,\s*|\s+)(?:US|USA|United States))?\s*$/i)?.[1] ?? '';
 export const displayAddress = address => address.replace(/^.*? · /, '');
 export const hasStreetAddress = address => Boolean(postalCode(address) && !/^\d{5}(?:-\d{4})?(?:,\s*(?:US|USA))?$/i.test(displayAddress(address)));
 export const shortAddress = address => {
   const text = displayAddress(address);
   return text.match(/(?:^|, )([^,]+, [A-Za-z]{2} \d{5}(?:-\d{4})?)$/)?.[1] ?? text;
 };
-export const addressValue = address => address.label + ' · ' + address.street + ', ' + address.city + ', ' + address.region + ' ' + address.zip;
+export const addressValue = address => `${address.street}, ${address.city}, ${address.region} ${address.zip}`;
 export const addressContactFields = { company: 'Company', unit: 'Unit', contact: 'Contact', phone: 'Phone', phoneExtension: 'PhoneExtension', email: 'Email' };
 
 const demoAddresses = [
@@ -102,7 +129,7 @@ export function itemCommodities(item, legacyDescription = '') {
 
 export function emptyShipment(mode = 'ltl') {
   return {
-    origin: '', destination: '', pickupDate: dateInZone(), pickupTime: '09:00',
+    origin: '', destination: '', pickupDate: '', pickupTime: '09:00',
     addressTypes: { origin: '', destination: '' }, services: { origin: [], destination: [] }, items: [emptyItem()],
     ...(mode === 'ftl' ? { mode, equipment: '', vehicleCount: 1 } : {})
   };
@@ -149,10 +176,50 @@ export const carrierProfiles = {
   economy: { name: 'Estes Express Lines', logo: 'EXLA.png' },
   standard: { name: 'XPO', logo: 'XPOL.png' },
   express: { name: 'FedEx Freight', logo: 'FXFE.png' },
+  abfs: { name: 'ABF Freight', logo: 'ABFS.png' },
+  fwdn: { name: 'Forward Air', logo: 'FWDN.png' },
+  odfl: { name: 'Old Dominion', logo: 'ODFL.png' },
+  saia: { name: 'Saia', logo: 'SAIA.png' },
+  tfin: { name: 'TForce Freight', logo: 'TFIN.png' },
+  ctbv: { name: 'Custom Companies' },
+  echs: { name: 'Echo Global Logistics' },
   'ftl-economy': { name: '整车承运渠道 A' },
   'ftl-standard': { name: '整车承运渠道 B' },
   'ftl-express': { name: '整车承运渠道 C' }
 };
+
+const ltlServiceNames = {
+  standard: '标准方案', express: '加急方案', guaranteed: '保证送达', noon: '保证中午 12 点前送达'
+};
+
+// Sample prices set the relative price of each option. Demo totals still use the current shipment.
+const ltlRateExamples = [
+  { carrierId: 'abfs', service: 'standard', transit: [2, 2], referencePrice: 253.13 },
+  { carrierId: 'abfs', service: 'guaranteed', transit: [2, 2], referencePrice: 485.72 },
+  { carrierId: 'abfs', service: 'noon', transit: [2, 2], referencePrice: 533.75 },
+  { carrierId: 'fwdn', service: 'standard', transit: [1, 1], referencePrice: 276.04 },
+  { carrierId: 'odfl', service: 'standard', transit: [1, 1], referencePrice: 679.24 },
+  { carrierId: 'odfl', service: 'guaranteed', transit: [1, 1], referencePrice: 837.57 },
+  { carrierId: 'saia', service: 'standard', transit: [1, 1], referencePrice: 358.24 },
+  { carrierId: 'saia', service: 'guaranteed', transit: [1, 1], referencePrice: 439.25 },
+  { carrierId: 'saia', service: 'noon', transit: [1, 1], referencePrice: 582.75 },
+  { carrierId: 'tfin', service: 'standard', transit: [1, 1], referencePrice: 269.89 },
+  { carrierId: 'tfin', service: 'guaranteed', transit: [1, 1], referencePrice: 385.62 },
+  { carrierId: 'standard', service: 'guaranteed', transit: [1, 1], referencePrice: 373.19 },
+  { carrierId: 'standard', service: 'express', transit: [1, 1], referencePrice: 269.32 },
+  { carrierId: 'ctbv', service: 'standard', transit: [1, 3], referencePrice: 208.27 },
+  { carrierId: 'echs', service: 'standard', transit: [1, 1], referencePrice: 1859.44 }
+];
+
+const fedExRateExamples = [
+  { id: 'fxfe-economy-direct-appt', name: 'Economy Direct Basic by Appt', businessDays: [4, 6], factor: 1.27 },
+  { id: 'fxfe-economy-direct', name: 'Economy Direct Basic', businessDays: [4, 5], factor: 1.21 },
+  { id: 'fxfe-priority-premium', name: 'Priority Direct Premium', businessDays: [1, 1], factor: 1.86 },
+  { id: 'fxfe-priority-standard', name: 'Priority Direct Standard', businessDays: [1, 2], factor: 1.66 },
+  { id: 'fxfe-priority-direct-appt', name: 'Priority Direct Basic by Appt', businessDays: [2, 3], factor: 1.57 },
+  { id: 'fxfe-priority-direct', name: 'Priority Direct Basic', businessDays: [1, 2], factor: 1.51 },
+  { id: 'fxfe-economy', name: 'Economy', businessDays: [4, 6], factor: 1.13 }
+];
 const sides = ['origin', 'destination'];
 
 export function cargoReady(shipment) {
@@ -163,8 +230,9 @@ export function cargoReady(shipment) {
 
 export function pricingReady(shipment) {
   const equipmentReady = shipmentMode(shipment) === 'ltl' || (Object.hasOwn(equipmentTypes, shipment.equipment)
-    && Number.isSafeInteger(shipment.vehicleCount) && shipment.vehicleCount > 0 && shipment.pickupDate);
-  return equipmentReady && sides.every(side => postalCode(shipment[side]) && Object.hasOwn(addressTypes, addressTypeFor(shipment, side))) && cargoReady(shipment);
+    && Number.isSafeInteger(shipment.vehicleCount) && shipment.vehicleCount > 0);
+  return Boolean(shipment.pickupDate && shipment.pickupDate >= dateInZone()) && equipmentReady
+    && sides.every(side => postalCode(shipment[side]) && Object.hasOwn(addressTypes, addressTypeFor(shipment, side))) && cargoReady(shipment);
 }
 
 function pricingSnapshot(shipment) {
@@ -227,15 +295,28 @@ function ratesFor(shipment, quoteId) {
   }, 0);
 
   const expiresAt = Date.now() + 30 * 60 * 1000;
-  return [
+  const options = [
     { id: 'economy', name: '经济方案', businessDays: ftl ? [3, 5] : [5, 7], factor: 1 },
     { id: 'standard', name: '标准方案', businessDays: [3, 4], factor: 1.19 },
-    { id: 'express', name: '加急方案', businessDays: ftl ? [2, 3] : [1, 2], factor: 1.43 }
-  ].map(({ factor, ...rate }, index) => {
-    const serviceId = ftl ? `ftl-${rate.id}` : rate.id;
+    { id: 'express', name: ftl ? '加急方案' : 'FedEx Freight Priority', businessDays: ftl ? [2, 3] : [1, 2], factor: 1.43 }
+  ].map(rate => {
+    const id = ftl ? `ftl-${rate.id}` : rate.id;
+    return { ...rate, id, carrierId: id };
+  });
+  if (!ftl) {
+    const extraDays = Math.floor(zoneDifference / 2);
+    options.push(...ltlRateExamples.map(({ carrierId, service, transit, referencePrice }) => ({
+      id: `${carrierId}-${service}`, carrierId, name: ltlServiceNames[service],
+      businessDays: transit.map(days => days + extraDays), factor: referencePrice / 276.04
+    })));
+    options.push(...fedExRateExamples.map(rate => ({ ...rate, carrierId: 'express', name: 'FedEx Freight ' + rate.name })));
+  }
+  return options.map(({ factor, ...rate }, index) => {
     const freight = Math.round(base * factor * 100);
+    const [minDays, maxDays] = rate.businessDays;
+    const days = minDays === maxDays ? minDays : `${minDays}–${maxDays}`;
     return {
-      ...rate, id: serviceId, carrierId: serviceId, days: rate.businessDays.join('–') + ' 个工作日',
+      ...rate, days: days + ' 个工作日',
       freight, accessorial, total: freight + accessorial, expiresAt, reference: quoteId + '-' + (index + 1)
     };
   });
@@ -295,6 +376,27 @@ export function hazardDeclarationsReady(shipment) {
 export const detailsReady = quote => sides.every(side => stopDetailsReady(quote, side)) && hazardDeclarationsReady(quote.shipment);
 
 export const invoiceId = order => 'INV-' + order.id.slice(4);
+
+export function billingRecords(orders) {
+  return orders.flatMap(order => {
+    const bill = {
+      id: invoiceId(order), orderId: order.id, status: order.billing, issued: order.issued,
+      total: order.rate.total, charges: [['运输费用', order.rate.freight], ['附加服务', order.rate.accessorial]]
+    };
+    const adjustment = {
+      'HYE-DEMO-102': { label: '送货尾板费', amount: 6500, reason: '送货现场使用了尾板，原账单未包含此项服务。', status: 'due' },
+      'HYE-DEMO-101': { label: '提货等候费', amount: 4500, reason: '提货超出免费等候时间，承运商补收等候费。', status: 'paid' }
+    }[order.id];
+    if (!order.issued || !adjustment) return [bill];
+    return [bill, {
+      id: 'RB-' + order.id.slice(4), orderId: order.id, originalId: bill.id,
+      issued: order.issued, status: adjustment.status, total: adjustment.amount,
+      reason: adjustment.reason, charges: [[adjustment.label, adjustment.amount]]
+    }];
+  });
+}
+
+export const billHref = bill => bill.originalId ? `#billing/rebills/${bill.id}` : `#billing/${bill.orderId}`;
 const idFor = prefix => prefix + Array.from(crypto.getRandomValues(new Uint8Array(5)), byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
 const storageKey = 'hye-oms-client-demo-v1';
 
@@ -381,26 +483,48 @@ function persist(state) {
   }
 }
 
-export function createTicket({ subject, category, orderId, description }) {
+export function validateCase(state, { kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description }) {
+  if (!Object.hasOwn(caseTypes, kind) || !subject || !description || !caseCategory({ kind, category })) return '请填写问题类型、主题和说明。';
+  if (kind === 'disputes') {
+    const bill = billingRecords(state.orders).find(entry => entry.id === billId && entry.issued);
+    if (!bill || (charge !== 'all' && !bill.charges.some(([label, amount]) => label === charge && amount > 0))) return '请选择已出账的账单和费用项。';
+    const existing = latestCase(state.tickets, kind, billId);
+    if (existing && existing.status !== 'closed') return '该账单已有进行中的申诉。';
+  }
+  if (kind === 'claims') {
+    const order = state.orders.find(entry => entry.id === orderId && entry.status !== 'ready');
+    if (!order) return '请选择已提货的运单。';
+    if (requestedAmount && (!/^\d{1,9}(?:\.\d{1,2})?$/.test(requestedAmount) || Number(requestedAmount) <= 0)) return '请填写有效的索赔金额。';
+    const existing = latestCase(state.tickets, kind, orderId);
+    if (existing && existing.status !== 'closed') return '该运单已有进行中的索赔。';
+  }
+  if (kind !== 'disputes' && orderId && !state.orders.some(order => order.id === orderId)) return '请选择有效的关联运单。';
+  return '';
+}
+
+export function createTicket({ kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description }, files = []) {
   const state = currentState();
-  if (!subject || !description || !Object.hasOwn(ticketCategories, category)) return;
-  if (orderId && !state.orders.some(order => order.id === orderId)) return;
+  if (validateCase(state, { kind, subject, category, orderId, billId, charge, requestedAmount, description })) return;
+  if (kind === 'disputes') orderId = billingRecords(state.orders).find(bill => bill.id === billId).orderId;
   const at = Date.now();
   const ticket = {
-    id: idFor('TK-'), subject, category, orderId, status: 'pending', createdAt: at, updatedAt: at,
-    messages: [{ by: 'customer', text: description, at }]
+    id: idFor(caseTypes[kind].prefix), kind, subject, category, orderId, status: 'pending', createdAt: at, updatedAt: at,
+    ...(kind === 'disputes' ? { billId, charge } : {}),
+    ...(kind === 'claims' && requestedAmount ? { requestedAmount: Math.round(Number(requestedAmount) * 100) } : {}),
+    messages: [{ by: 'customer', text: description, at, files }]
   };
   persist({ ...state, tickets: [ticket, ...state.tickets] });
   return ticket;
 }
 
-export function updateTicket(id, reply = '') {
+export function updateTicket(id, reply = '', files = []) {
   const state = currentState();
   const ticket = state.tickets.find(ticket => ticket.id === id);
   if (!ticket || ticket.status === 'closed') return;
   const at = Date.now();
-  const entry = reply ? { by: 'customer', text: reply, at } : { by: 'system', text: '工单已关闭', at };
-  const updated = { ...ticket, status: reply ? ticket.status : 'closed', updatedAt: at, messages: [...ticket.messages, entry] };
+  const responding = Boolean(reply || files.length);
+  const entry = responding ? { by: 'customer', text: reply, at, files } : { by: 'system', text: caseTypes[caseKind(ticket)].label + '已关闭', at };
+  const updated = { ...ticket, status: responding ? ticket.status : 'closed', updatedAt: at, messages: [...ticket.messages, entry] };
   persist({ ...state, tickets: state.tickets.map(ticket => ticket.id === id ? updated : ticket) });
   return updated;
 }
@@ -417,11 +541,12 @@ function storeQuote(state, quote) {
   return quote;
 }
 
-export function saveQuote(shipment, previousId) {
+export function saveQuote(shipment, previousId, supplemental = {}) {
   const state = currentState();
   const booked = state.orders.some(order => order.quoteId === previousId);
   const previous = booked ? null : state.quotes.find(entry => entry.id === previousId);
-  return storeQuote(state, priceQuote({ ...previous, id: previous?.id ?? idFor('QT-'), stage: 'compare' }, shipment));
+  const details = { ...previous?.details, ...supplemental };
+  return storeQuote(state, priceQuote({ ...previous, id: previous?.id ?? idFor('QT-'), stage: 'compare', details }, shipment));
 }
 
 export function updateQuote(id, update) {

@@ -8,6 +8,7 @@ const longitudeFrom = (lon, origin) => ((lon - origin + 540) % 360) - 180;
 const roadRoutes = new Map();
 let nextRoadRequest = 0;
 let mapData;
+let zipData;
 
 async function loadFile(path, format) {
   const response = await fetch(new URL(path, import.meta.url));
@@ -15,12 +16,17 @@ async function loadFile(path, format) {
   return response[format]();
 }
 
+export function loadZipPoints() {
+  zipData ??= loadFile('./map-data/zip-points.csv', 'text').then(text => new Map(text.trim().split('\n').map(row => {
+    const [zip, longitude, latitude] = row.split(',');
+    return [zip, [Number(longitude), Number(latitude)]];
+  }))).catch(error => { zipData = undefined; throw error; });
+  return zipData;
+}
+
 function loadMapData() {
   mapData ??= Promise.all([
-    loadFile('./map-data/zip-points.csv', 'text').then(text => new Map(text.trim().split('\n').map(row => {
-      const [zip, longitude, latitude] = row.split(',');
-      return [zip, [Number(longitude), Number(latitude)]];
-    }))),
+    loadZipPoints(),
     loadFile('./map-data/state-outlines.json', 'json')
   ]).catch(error => { mapData = undefined; throw error; });
   return mapData;

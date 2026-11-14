@@ -1,8 +1,8 @@
 import {
   billStatuses, carrierProfiles, displayAddress, invoiceId, itemCommodities, money, orderDocuments,
   packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=tickets';
-import { e } from './views.js?v=tickets';
+} from './model.js?v=campaigns';
+import { e } from './views.js?v=dashboard-hero-first';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
