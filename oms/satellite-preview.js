@@ -1,6 +1,6 @@
-import { displayAddress, postalCode } from './model.js?v=campaigns';
-import { locateStreetAddress } from './address-search.js?v=campaigns';
-import { loadZipPoints } from './route-map.js?v=campaigns';
+import { displayAddress, hasStreetAddress, postalCode } from './model.js?v=zip-suggestions';
+import { locateStreetAddress } from './address-search.js?v=zip-prefix';
+import { loadZipPoints } from './route-map.js?v=zip-suggestions';
 
 const imageryTiles = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';
 const minZoom = 3;
@@ -93,7 +93,7 @@ export function createSatelliteDrawer(drawer) {
     request = new AbortController();
     const { signal } = request;
     try {
-      const exact = /[a-z]/i.test(address.replace(/(?:,?\s+(?:US|USA|United States))$/i, ''))
+      const exact = hasStreetAddress(address)
         ? await locateStreetAddress(address, AbortSignal.any([signal, AbortSignal.timeout(3800)])).catch(() => undefined)
         : undefined;
       if (signal.aborted || !drawer.open) return;

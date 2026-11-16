@@ -1,11 +1,11 @@
 import {
-  serviceOptions, selectedServices, addressTypes, addressTypeFor, zones, unitSettings, packaging, orderStatuses, orderTypes, orderType, orderRoute, orderRecordHref, billStatuses,
+  serviceOptions, selectedServices, addressTypes, addressTypeFor, zones, unitSettings, packaging, orderStatuses, orderTypes, orderType, orderRoute, orderRecordHref, chargedBillStatus,
   dateInZone, totals, displayAddress, shortAddress, addressValue, invoiceId, money, displayMeasurement,
   carrierProfiles, selectedRate, quoteStatus, postalCode, stopDetailsReady, itemCommodities,
   hazardClasses, packingGroups, hazardIdPattern, stopSupplement, cargoReady, estimatedLinearFeet, orderDocuments,
   quoteModes, shipmentMode, quoteEntry, equipmentTypes, equipmentSummary, addressContactFields, ticketStatuses, ticketCategories, billHref,
-  caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons, billingRecords
-} from './model.js?v=campaigns';
+  caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons
+} from './model.js?v=zip-suggestions';
 
 export const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -567,7 +567,7 @@ export function quoteSummary(quote, message = '', review = false) {
   const breakdown = rate ? detailList(timing) + feeBreakdown(rate, true) : '';
   const compactPrice = rate ? `<div class="quote-total"><span class="note">预计合计 (USD)</span><strong>${money(rate.total)}</strong><p class="note">${e(rate.days)}${quote.shipment.pickupDate && rate.businessDays?.length ? ' · 预计 ' + e(arrival) + ' 送达' : ''}</p></div>
     <details class="quote-fees"><summary class="sub-disclosure"><strong>费用明细与有效期</strong>${icon('chev')}</summary><div class="quote-fees-body">${breakdown}</div></details>` : '';
-  const reviewPrice = rate ? `<div class="review-price"><span class="note">${state === 'valid' ? '预计合计 (USD)' : '已选报价合计 (USD)'}</span><strong>${money(rate.total)}</strong></div>
+  const reviewPrice = rate ? `<div class="review-price"><span class="note">${state === 'valid' ? '本次扣款金额 (USD)' : '已选报价合计 (USD)'}</span><strong>${money(rate.total)}</strong></div>
     ${detailList(timing, 'review-rate-timing')}${detailList(feeRows(rate), 'fees review-fees')}` : '';
   return `
     <div class="detail-block">
@@ -579,7 +579,7 @@ export function quoteSummary(quote, message = '', review = false) {
       ${rateActions(quote, review)}
     </div>
     ${review
-      ? `<button class="btn primary" type="button" data-action="confirm-booking" data-quote="${e(quote.id)}"${state === 'valid' ? '' : ' disabled'}>确认演示下单</button>`
+      ? `<p class="note">确认下单时按所选报价扣款。本页面仅模拟扣款。</p><button class="btn primary" type="button" data-action="confirm-booking" data-quote="${e(quote.id)}"${state === 'valid' ? '' : ' disabled'}>确认下单并扣款</button>`
       : quickRates(quote, state) + '<button class="btn primary" type="submit" form="details-form">核对订单</button>'}`;
 }
 
@@ -768,6 +768,7 @@ export function confirmationView(quote, message = '') {
 function status(value, mapping) {
   return '<span class="status ' + value + '">' + mapping[value] + '</span>';
 }
+const chargedStatus = `<span class="status paid">${chargedBillStatus}</span>`;
 function emptyRow(columns, message) {
   return `<tr><td class="empty" colspan="${columns}">${message}</td></tr>`;
 }
@@ -803,17 +804,13 @@ export function campaignDetails(id) {
 export function dashboardView({ orders, quotes, tickets }) {
   const booked = new Set(orders.map(order => order.quoteId));
   const drafts = quotes.filter(quote => quote.stage === 'details' && quote.selectedRateId && !booked.has(quote.id));
-  const due = billingRecords(orders).filter(bill => bill.status === 'due');
-  const invoices = due.filter(bill => !bill.originalId);
-  const rebills = due.filter(bill => bill.originalId);
+  const unselected = quotes.filter(quote => quote.stage === 'compare' && !booked.has(quote.id));
   const openCases = tickets.filter(ticket => ticket.status !== 'closed').sort((a, b) => b.updatedAt - a.updatedAt);
-  const billLink = (items, kind, href, label) => items.length
-    ? `<a class="link" href="${href}" data-action="dashboard-due" data-kind="${kind}">${label} ${items.length} 笔 ${icon('chev')}</a>` : '';
-  const dueLinks = billLink(invoices, 'bills', '#billing', '账单') + billLink(rebills, 'rebills', '#billing/rebills', '补收');
   const tasks = [
     ['待完善订单', String(drafts.length), drafts.length
       ? `<a class="link" href="#details/${e(drafts[0].id)}">继续最近一票 ${icon('chev')}</a>` : '<span class="note">暂无待完善订单</span>'],
-    ['待支付账单', money(due.reduce((sum, bill) => sum + bill.total, 0)), dueLinks || '<span class="note">暂无待支付账单</span>'],
+    ['待选报价', String(unselected.length), unselected.length
+      ? `<a class="link" href="#rates/${e(unselected[0].id)}">比较最新报价 ${icon('chev')}</a>` : '<span class="note">暂无待选报价</span>'],
     ['未关闭工单与申诉', String(openCases.length), openCases.length
       ? `<a class="link" href="${e(caseHref(openCases[0]))}">查看最近一条 ${icon('chev')}</a>` : '<span class="note">暂无未关闭记录</span>']
   ];
@@ -884,15 +881,27 @@ export function orderRows(orders, selectedId, kind) {
   </tr>`;
   }).join('') || emptyRow(4, kind === 'custom' ? '没有符合条件的定制服务记录' : '没有符合条件的运单');
 }
-export function billRows(bills, selectedId, type) {
-  return bills.map(bill => `<tr${bill.id === selectedId ? ' class="table-row-selected"' : ''}>
-    <td>${recordLink(billHref(bill), bill.id, bill.id === selectedId)}${bill.originalId ? `<small>${e(bill.charges[0][0])}</small>` : ''}</td>
+function billOrderCargo(order) {
+  const { shipment } = order;
+  return orderType(order) === 'ftl' && !shipment.items?.length ? equipmentSummary(shipment)
+    : shipment.items?.length ? cargoLabel(shipment) : '';
+}
+
+export function billRows(bills, selectedId, { type, ordersById }) {
+  return bills.map(bill => {
+    const order = ordersById.get(bill.orderId);
+    const kind = order ? orderType(order) : 'ltl';
+    const summary = order ? `<small>${routeLabel(order.shipment)}</small><small>${e([quoteModes[kind] ?? orderTypes[kind], billOrderCargo(order)].filter(Boolean).join(' · '))}</small>` : '';
+    return `<tr${bill.id === selectedId ? ' class="table-row-selected"' : ''}>
+    <td>${recordLink(billHref(bill), bill.id, bill.id === selectedId)}${bill.originalId ? `<small>${e(bill.charges[0]?.[0])}</small>` : ''}
+      ${summary ? `<div class="bill-order-summary bill-order-compact">${summary}</div>` : ''}</td>
     ${bill.originalId ? `<td class="bill-table-original"><a class="link" href="#billing/${e(bill.orderId)}">${e(bill.originalId)}</a></td>` : ''}
-    <td class="bill-table-order"><a class="link" href="#orders/${e(bill.orderId)}">${e(bill.orderId)}</a></td>
-    <td class="list-table-date">${bill.issued ? `<time datetime="${e(bill.issued)}">${e(bill.issued)}</time>` : '—'}</td>
-    <td class="list-table-amount">${bill.issued ? `<strong class="amount">${money(bill.total)}</strong>` : '<span class="note">待出账</span>'}</td>
-    <td>${status(bill.status, billStatuses)}</td>
-  </tr>`).join('') || emptyRow(type === 'rebills' ? 6 : 5, type === 'rebills' ? '没有符合条件的补收账单' : '没有符合条件的账单');
+    <td class="bill-table-order"><a class="link" href="${e(orderRecordHref(kind, { id: bill.orderId }))}">${e(bill.orderId)}</a><div class="bill-order-summary">${summary}</div></td>
+    <td class="list-table-date">${bill.chargedOn ? `<time datetime="${e(bill.chargedOn)}">${e(bill.chargedOn)}</time>` : '—'}</td>
+    <td class="list-table-amount"><strong class="amount">${money(bill.total)}</strong></td>
+    <td>${chargedStatus}</td>
+  </tr>`;
+  }).join('') || emptyRow(type === 'rebills' ? 6 : 5, type === 'rebills' ? '没有符合条件的补收账单' : '没有符合条件的账单');
 }
 function tracking(order) {
   const stages = Object.entries(orderStatuses);
@@ -909,7 +918,7 @@ function orderOverview(order) {
   return `<section class="detail-block"><h3 class="subhead">承运商</h3><div class="order-carrier">${carrierIdentity(order.rate)}<span class="note">${e(order.rate.name || order.rate.days)}</span></div></section>
     <section class="detail-block"><h3 class="subhead">轨迹动态</h3>${tracking(order)}</section>
     <section class="detail-block"><div class="panel-head"><h3 class="subhead">返单动态</h3><span class="status${returned ? ' paid' : ''}">${podStatus}</span></div><p class="note">${podMessage}</p></section>
-    <section class="detail-block"><div class="panel-head"><h3 class="subhead">账单状态</h3>${status(order.billing, billStatuses)}</div><a class="link" href="#billing/${e(order.id)}">查看关联账单 ${icon('arrow')}</a></section>`;
+    <section class="detail-block"><div class="panel-head"><h3 class="subhead">账单状态</h3>${chargedStatus}</div><a class="link" href="#billing/${e(order.id)}">查看关联账单 ${icon('arrow')}</a></section>`;
 }
 
 function orderInformation(order) {
@@ -926,9 +935,8 @@ function orderInformation(order) {
 
 function orderFiles(order) {
   return `<ul class="order-files">${Object.entries(orderDocuments).map(([kind, [name, label]]) => {
-    const available = kind !== 'invoice' || Boolean(order.issued);
-    return `<li><div class="order-file-name">${icon('bill')}<div><strong>${name}</strong><p class="note">${label}${kind === 'invoice' && order.issued ? ' · ' + e(invoiceId(order)) : ''}</p></div></div>
-      ${available ? `<div class="actions"><button class="link" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="preview" aria-label="预览 ${name}">预览</button><button class="btn small" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="download" aria-label="下载 ${name}">下载</button></div>` : '<span class="status">待出账</span>'}</li>`;
+    return `<li><div class="order-file-name">${icon('bill')}<div><strong>${name}</strong><p class="note">${label}${kind === 'invoice' ? ' · ' + e(invoiceId(order)) : ''}</p></div></div>
+      <div class="actions"><button class="link" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="preview" aria-label="预览 ${name}">预览</button><button class="btn small" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="download" aria-label="下载 ${name}">下载</button></div></li>`;
   }).join('')}</ul>`;
 }
 
@@ -977,35 +985,60 @@ export function orderDetail(order, activeTab, totalCount, claim, kind) {
   return managementDetail(title, tabPanels('order', sections, activeTab, 'detail-body order-tab-body'),
     order.id, status(order.status, orderStatuses), controls);
 }
+function billDisclosure(title, preview, content) {
+  return `<details class="bill-disclosure">
+    <summary class="sub-disclosure"><span class="bill-disclosure-label"><strong>${title}</strong><small>${preview}</small></span>${icon('chev')}</summary>
+    <div class="bill-disclosure-body">${content}</div>
+  </details>`;
+}
+
+function billOrderDisclosure(order) {
+  const { shipment } = order;
+  const kind = orderType(order);
+  return billDisclosure('关联运单', e(order.id) + ' · ' + routeLabel(shipment), `${detailList([
+    ['运输类型', e(quoteModes[kind] ?? orderTypes[kind])], ['运单状态', e(orderStatuses[order.status])],
+    ['提货地址', e(displayAddress(shipment.origin))], ['送货地址', e(displayAddress(shipment.destination))],
+    ['提货日期', e(shipment.pickupDate)], ['货物', e(billOrderCargo(order))],
+    ...(kind === 'ftl' && shipment.items?.length ? [['车型与数量', e(equipmentSummary(shipment))]] : [])
+  ].filter(([, value]) => value))}
+  <a class="link" href="${e(orderRecordHref(kind, order))}">查看运单详情 ${icon('arrow')}</a>`);
+}
+
+function billAdjustmentDisclosure(bill, linkToBill) {
+  const items = bill.charges.map(([label]) => label).join('、');
+  return billDisclosure(linkToBill ? e(bill.id) : '补收说明', e(items) + ' · ' + money(bill.total), `
+    ${bill.reason ? `<p>${e(bill.reason)}</p>` : ''}
+    ${linkToBill && bill.chargedOn ? detailList([['扣款日期', e(bill.chargedOn)]]) : ''}
+    ${linkToBill ? `<a class="link" href="${e(billHref(bill))}">查看补收账单详情 ${icon('arrow')}</a>` : ''}`);
+}
+
 export function billDetail(bill, billing, dispute) {
   const label = billing.type === 'rebills' ? '补收账单' : '账单';
   const title = label + '详情';
   if (!bill) return managementDetail(title, `<p class="empty">${billing.bills.length ? '没有符合条件的' : '暂无'}${label}</p>`);
   const related = billing.records.filter(entry => entry.originalId === bill.id);
-  const amount = `<dl class="bill-detail-amount${bill.issued ? '' : ' estimate'}"><dt>${bill.issued ? '账单金额 (USD)' : '预计费用 (USD)'}</dt><dd>${money(bill.total)}</dd></dl>`;
+  const order = billing.ordersById.get(bill.orderId);
+  const amount = `<dl class="bill-detail-amount"><dt>已扣款金额 (USD)</dt><dd>${money(bill.total)}</dd></dl>`;
   const body = `<div class="detail-body">
-    ${bill.issued ? '' : '<p class="note bill-estimate-note">正式金额以出账为准。出账后可下载账单明细。</p>'}
     <section class="detail-block">${detailList([
-      ['关联运单', `<a class="link" href="#orders/${e(bill.orderId)}">${e(bill.orderId)}</a>`],
       ...(bill.originalId ? [['原账单', `<a class="link" href="#billing/${e(bill.orderId)}">${e(bill.originalId)}</a>`]] : []),
-      ...(bill.issued ? [['出账日期', e(bill.issued)]] : [])
+      ['扣款日期', e(bill.chargedOn || '—')]
     ])}</section>
-    ${bill.reason ? `<section class="detail-block"><h3 class="subhead">补收原因</h3><p>${e(bill.reason)}</p></section>` : ''}
     <section class="detail-block"><h3 class="subhead">费用明细</h3>${detailList(bill.charges.map(([label, amount]) => [label, money(amount)]), 'fees')}</section>
-    ${related.length ? `<section class="detail-block"><h3 class="subhead">关联补收账单</h3>${related.map(entry => `<div class="panel-head"><a class="link" href="${e(billHref(entry))}">${e(entry.id)}</a><span>${money(entry.total)}</span></div>`).join('')}</section>` : ''}
-    ${bill.issued
-      ? `<div class="actions end bill-detail-actions">${caseEntry('disputes', bill, dispute)}<button type="button" class="btn primary small" data-action="download-bill" data-bill="${e(bill.id)}">下载账单明细</button></div>`
-      : ''}
+    ${order ? billOrderDisclosure(order) : detailList([['关联运单', e(bill.orderId)]])}
+    ${bill.originalId ? billAdjustmentDisclosure(bill, false) : ''}
+    ${related.length ? `<section class="detail-block"><h3 class="subhead">关联补收账单</h3>${related.map(entry => billAdjustmentDisclosure(entry, true)).join('')}</section>` : ''}
+    <div class="actions end bill-detail-actions">${caseEntry('disputes', bill, dispute)}<button type="button" class="btn primary small" data-action="download-bill" data-bill="${e(bill.id)}">下载账单明细</button></div>
     </div>`;
-  return managementDetail(title, body, bill.id, status(bill.status, billStatuses) + amount);
+  return managementDetail(title, body, bill.id, chargedStatus + amount);
 }
 function listingSearch(placeholder, query) {
   return `<label class="with-icon"><span class="sr-only">${placeholder}</span>${icon('search')}<input class="text-input" type="search" name="query" placeholder="${placeholder}" value="${e(query)}"></label>`;
 }
 function managementToolbar(statuses, filter, counts, placeholder, action = '') {
   return `<div class="management-toolbar">
-    <div class="management-status-tabs" role="group" aria-label="按状态筛选">${[['', '全部'], ...Object.entries(statuses)].map(([value, name]) =>
-      `<button type="button" data-action="list-status-filter" data-status="${value}" aria-pressed="${filter.status === value}">${name} <span class="management-status-count">${counts[value] ?? 0}</span></button>`).join('')}</div>
+    ${statuses ? `<div class="management-status-tabs" role="group" aria-label="按状态筛选">${[['', '全部'], ...Object.entries(statuses)].map(([value, name]) =>
+      `<button type="button" data-action="list-status-filter" data-status="${value}" aria-pressed="${filter.status === value}">${name} <span class="management-status-count">${counts[value] ?? 0}</span></button>`).join('')}</div>` : ''}
     <div class="management-search">${listingSearch(placeholder, filter.query)}${action}</div>
   </div>`;
 }
@@ -1182,26 +1215,20 @@ export function caseForm(kind, records, selected) {
   </form>`;
 }
 
-export function billingView(billing, result, selected, counts, dispute) {
+export function billingView(billing, result, selected, dispute) {
   const { type, bills, filter } = billing;
   const rebills = type === 'rebills';
-  const due = bills.filter(bill => bill.status === 'due');
-  const dueAmount = due.reduce((sum, bill) => sum + bill.total, 0);
-  const pending = bills.filter(bill => bill.status === 'pending').length;
+  const totalCharged = bills.reduce((sum, bill) => sum + bill.total, 0);
   const summary = `<div class="billing-summary" aria-label="${rebills ? '补收账单汇总' : '账单汇总'}">
-    <button class="billing-metric" type="button" data-action="billing-summary-filter" data-status="due">
-      <span>待支付总额</span><strong>${money(dueAmount)}</strong><span>· ${due.length} 笔</span>
-    </button>
-    ${rebills ? '' : `<button class="billing-metric" type="button" data-action="billing-summary-filter" data-status="pending"><span>待出账</span><strong>${pending} 笔</strong></button>`}
+    <p class="billing-metric"><span>累计已扣款</span><strong>${money(totalCharged)}</strong><span>· ${bills.length} 笔</span></p>
   </div>`;
   return managementPage({
     title: '账单管理', kind: type, label: rebills ? '补收账单列表' : '账单列表', result,
     tabs: managementTabs('账单类型', [['bills', '#billing', 'Bills <small>账单</small>'], ['rebills', '#billing/rebills', 'Rebills <small>补收账单</small>']], type, summary),
-    toolbar: managementToolbar(rebills ? { due: billStatuses.due, paid: billStatuses.paid } : billStatuses, filter, counts,
-      rebills ? '搜索补收单号、原单号或运单' : '搜索账单号或关联运单'),
+    toolbar: managementToolbar(null, filter, null, '搜索账单号、运单号或运输路线'),
     headers: [rebills ? '补收账单号' : '账单号', ...(rebills ? [['原账单号', 'bill-table-original']] : []),
-      ['关联运单', 'bill-table-order'], ['出账日期', 'list-table-date'], ['金额 (USD)', 'list-table-amount'], '状态'],
-    rows: billRows(result.rows, selected?.id, type), detail: billDetail(selected, billing, dispute)
+      ['订单摘要', 'bill-table-order'], ['扣款日期', 'list-table-date'], ['金额 (USD)', 'list-table-amount'], '状态'],
+    rows: billRows(result.rows, selected?.id, billing), detail: billDetail(selected, billing, dispute)
   });
 }
 

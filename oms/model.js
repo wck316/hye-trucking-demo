@@ -67,7 +67,7 @@ export const orderTypes = { ltl: 'LTL', ftl: 'FTL', custom: '定制服务' };
 export const orderType = order => order.shipment.mode === 'custom' ? 'custom' : shipmentMode(order.shipment);
 export const orderRoute = kind => kind === 'ltl' ? '#orders' : '#orders/' + kind;
 export const orderRecordHref = (kind, record) => orderRoute(kind) + '/' + record.id;
-export const billStatuses = { pending: '待出账', due: '待支付', paid: '已支付' };
+export const chargedBillStatus = '已扣款';
 export const ticketStatuses = { pending: '待处理', processing: '处理中', closed: '已关闭' };
 export const ticketCategories = {
   tracking: '运输跟踪', stops: '提送货问题', billing: '账单费用', documents: '文件与回单', damage: '货损理赔', other: '其他'
@@ -96,7 +96,8 @@ export const orderDocuments = { bol: ['BOL', '提单'], label: ['Label', '货运
 export const money = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 export const postalCode = value => value.match(/\b(\d{5})(?:-\d{4})?(?:(?:,\s*|\s+)(?:US|USA|United States))?\s*$/i)?.[1] ?? '';
 export const displayAddress = address => address.replace(/^.*? · /, '');
-export const hasStreetAddress = address => Boolean(postalCode(address) && !/^\d{5}(?:-\d{4})?(?:,\s*(?:US|USA))?$/i.test(displayAddress(address)));
+export const hasStreetAddress = address => Boolean(postalCode(address) &&
+  !/^(?:[^,]+,\s*[A-Za-z]{2}\s+)?\d{5}(?:-\d{4})?(?:(?:,\s*|\s+)(?:US|USA|United States))?$/i.test(displayAddress(address).trim()));
 export const shortAddress = address => {
   const text = displayAddress(address);
   return text.match(/(?:^|, )([^,]+, [A-Za-z]{2} \d{5}(?:-\d{4})?)$/)?.[1] ?? text;
@@ -376,21 +377,26 @@ export function hazardDeclarationsReady(shipment) {
 export const detailsReady = quote => sides.every(side => stopDetailsReady(quote, side)) && hazardDeclarationsReady(quote.shipment);
 
 export const invoiceId = order => 'INV-' + order.id.slice(4);
+export const orderChargeDate = order => order.date || order.issued || '';
 
 export function billingRecords(orders) {
   return orders.flatMap(order => {
     const bill = {
-      id: invoiceId(order), orderId: order.id, status: order.billing, issued: order.issued,
+      id: invoiceId(order), orderId: order.id, chargedOn: orderChargeDate(order),
       total: order.rate.total, charges: [['运输费用', order.rate.freight], ['附加服务', order.rate.accessorial]]
     };
     const adjustment = {
-      'HYE-DEMO-102': { label: '送货尾板费', amount: 6500, reason: '送货现场使用了尾板，原账单未包含此项服务。', status: 'due' },
-      'HYE-DEMO-101': { label: '提货等候费', amount: 4500, reason: '提货超出免费等候时间，承运商补收等候费。', status: 'paid' }
+      'HYE-DEMO-102': { label: '送货尾板费', amount: 6500, reason: '送货现场使用了尾板，原账单未包含此项服务。', daysAfterBooking: 2 },
+      'HYE-DEMO-101': { label: '提货等候费', amount: 4500, reason: '提货超出免费等候时间，承运商补收等候费。', daysAfterBooking: 3 }
     }[order.id];
-    if (!order.issued || !adjustment) return [bill];
+    if (!adjustment) return [bill];
+    const adjustmentDate = Date.parse(bill.chargedOn + 'T00:00:00Z');
+    const chargedOn = Number.isFinite(adjustmentDate)
+      ? new Date(adjustmentDate + adjustment.daysAfterBooking * 86400000).toISOString().slice(0, 10)
+      : '';
     return [bill, {
       id: 'RB-' + order.id.slice(4), orderId: order.id, originalId: bill.id,
-      issued: order.issued, status: adjustment.status, total: adjustment.amount,
+      chargedOn, total: adjustment.amount,
       reason: adjustment.reason, charges: [[adjustment.label, adjustment.amount]]
     }];
   });
@@ -430,7 +436,6 @@ function seed() {
     ...priceQuote({ id: 'QT-DEMO-10' + (3 - index) }, shipment), date: dateInZone(defaultZone, -index * 3 - 1)
   }));
   const statuses = ['transit', 'delivered', 'delivered'];
-  const billing = ['pending', 'due', 'paid'];
   const orders = quotes.map((quote, index) => ({
     id: 'HYE-DEMO-10' + (3 - index),
     quoteId: quote.id,
@@ -438,9 +443,7 @@ function seed() {
     shipment: quote.shipment,
     rate: quote.rates[index === 2 ? 0 : 1],
     status: statuses[index],
-    billing: billing[index],
     ...(index === 2 ? { podReceived: dateInZone(defaultZone, -7) } : {}),
-    issued: index === 0 ? '' : dateInZone(defaultZone, index === 1 ? -2 : -8),
     date: quote.date
   }));
   const pending = priceQuote({ id: 'QT-DEMO-104', stage: 'compare' },
@@ -486,8 +489,8 @@ function persist(state) {
 export function validateCase(state, { kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description }) {
   if (!Object.hasOwn(caseTypes, kind) || !subject || !description || !caseCategory({ kind, category })) return '请填写问题类型、主题和说明。';
   if (kind === 'disputes') {
-    const bill = billingRecords(state.orders).find(entry => entry.id === billId && entry.issued);
-    if (!bill || (charge !== 'all' && !bill.charges.some(([label, amount]) => label === charge && amount > 0))) return '请选择已出账的账单和费用项。';
+    const bill = billingRecords(state.orders).find(entry => entry.id === billId);
+    if (!bill || (charge !== 'all' && !bill.charges.some(([label, amount]) => label === charge && amount > 0))) return '请选择账单和争议费用项。';
     const existing = latestCase(state.tickets, kind, billId);
     if (existing && existing.status !== 'closed') return '该账单已有进行中的申诉。';
   }
@@ -587,7 +590,7 @@ export function bookOrder(quoteId) {
 
   const order = {
     id: 'HYE-' + quote.id.slice(3), quoteId, reference, details: quote.details, shipment, rate,
-    date: dateInZone(), status: 'ready', billing: 'pending', issued: ''
+    date: dateInZone(), status: 'ready'
   };
   persist({ ...state, orders: [order, ...state.orders] });
   return order;

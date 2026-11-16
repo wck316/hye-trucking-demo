@@ -1,23 +1,23 @@
 import {
   currentState, emptyShipment, exampleShipment, emptyItem, saveQuote, bookOrder, saveProfile,
-  saveAddress, removeAddress, postalCode, addressValue, unitSettings, billStatuses, billingRecords, billHref,
+  saveAddress, removeAddress, postalCode, addressValue, unitSettings, chargedBillStatus, billingRecords, billHref, money,
   displayMeasurement, updateQuote, refreshQuote, chooseRate, quoteStatus, pricingReady, detailsReady, hasStreetAddress,
   addressTypes, shortAddress, stopDetailsReady, cargoReady, emptyCommodity, hazardDeclarationsReady, stopHoursReady,
   shipmentMode, quoteEntry, quoteModes, orderTypes, orderType, orderRoute, orderRecordHref, saveCustomRequest, addressContactFields, createDemoApiKey, revokeDemoApiKey,
   createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase
-} from './model.js?v=campaigns';
+} from './model.js?v=zip-suggestions';
 import {
   quoteView, ratesView, ordersView, billingView, accountView, dashboardView, campaignDetails, orderRows, billRows, billDetail,
   addressRows, addressForm, icon, e, detailsView, quoteSummary, confirmationView, carrierQuotes, workflowHeader,
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
   apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult
-} from './views.js?v=dashboard-hero-first';
-import { renderRouteMap } from './route-map.js?v=campaigns';
-import { orderDocument } from './order-documents.js?v=dashboard-hero-first';
-import { bindAddressSuggestions } from './address-search.js?v=campaigns';
-import { createSatelliteDrawer } from './satellite-preview.js?v=campaigns';
-import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=campaigns';
-import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=campaigns';
+} from './views.js?v=zip-suggestions';
+import { renderRouteMap } from './route-map.js?v=zip-suggestions';
+import { orderDocument } from './order-documents.js?v=zip-suggestions';
+import { bindAddressSuggestions } from './address-search.js?v=zip-prefix';
+import { createSatelliteDrawer } from './satellite-preview.js?v=zip-prefix';
+import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=zip-suggestions';
+import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
 
 const workspace = document.querySelector('#workspace');
 const breadcrumb = document.querySelector('#breadcrumb');
@@ -138,36 +138,38 @@ function currentBilling(orders) {
   const records = billingRecords(orders);
   const bills = records.filter(bill => Boolean(bill.originalId) === isRebill);
   const selected = bills.find(bill => isRebill ? bill.id === rebillId : bill.orderId === route);
-  return { type, records, bills, selected, filter: filters[type] };
+  return { type, records, bills, selected, filter: filters[type], ordersById: new Map(orders.map(order => [order.id, order])) };
 }
 
-function billFilterResults({ bills, filter }) {
+function billFilterResults({ bills, filter, ordersById }) {
   const term = filter.query.trim().toLowerCase();
-  const searched = bills.filter(bill => [bill.id, bill.orderId, bill.originalId, bill.reason].some(value => value?.toLowerCase().includes(term)));
-  return statusFilterResults(searched, filter.status);
+  return bills.filter(bill => {
+    const shipment = ordersById.get(bill.orderId)?.shipment;
+    return [bill.id, bill.orderId, bill.originalId, bill.reason, shipment?.origin, shipment?.destination]
+      .some(value => value?.toLowerCase().includes(term));
+  });
 }
 
 function renderBilling({ orders, tickets }) {
   const billing = currentBilling(orders);
-  let { matches, counts } = billFilterResults(billing);
+  let matches = billFilterResults(billing);
   if (billing.selected && !matches.includes(billing.selected)) {
     clearListFilters(billing.filter);
-    ({ matches, counts } = billFilterResults(billing));
+    matches = billFilterResults(billing);
   }
   const result = paginate(matches, billing.filter, billing.selected);
   const selected = billing.selected ?? result.rows[0];
   activeBillId = selected?.id;
-  return billingView(billing, result, selected, counts, latestCase(tickets, 'disputes', selected?.id));
+  return billingView(billing, result, selected, latestCase(tickets, 'disputes', selected?.id));
 }
 
 function updateBillFilter({ orders, tickets }) {
   const billing = currentBilling(orders);
   const { type, filter } = billing;
-  const { matches, counts } = billFilterResults(billing);
-  updateStatusFilters(filter, counts);
+  const matches = billFilterResults(billing);
   const result = paginate(matches, filter);
   const selected = result.rows.find(bill => bill.id === activeBillId) ?? result.rows[0];
-  updateListRows(billRows(result.rows, selected?.id, type));
+  updateListRows(billRows(result.rows, selected?.id, billing));
   updatePagination(type, result);
   if (selected?.id === activeBillId) return;
   activeBillId = selected?.id;
@@ -276,7 +278,7 @@ function openTicket(ticket) {
 }
 
 function caseRecords(state, kind) {
-  return kind === 'disputes' ? billingRecords(state.orders).filter(bill => bill.issued) : state.orders.filter(order => order.status !== 'ready');
+  return kind === 'disputes' ? billingRecords(state.orders) : state.orders.filter(order => order.status !== 'ready');
 }
 
 async function saveCaseChanges(form, commit, error, after) {
@@ -514,12 +516,12 @@ function showDialog(title, content, mode = '') {
 }
 
 function downloadBill(bill) {
-  if (!bill?.issued) return;
+  if (!bill) return;
   const amount = cents => (cents / 100).toFixed(2);
   const data = [
-    ['账单号', '关联运单', '出账日期', '币种', '状态', ...bill.charges.map(([label]) => label), '合计',
+    ['账单号', '关联运单', '扣款日期', '币种', '状态', ...bill.charges.map(([label]) => label), '已扣款金额',
       ...(bill.originalId ? ['原账单号', '补收原因'] : [])],
-    [bill.id, bill.orderId, bill.issued, 'USD', billStatuses[bill.status], ...bill.charges.map(([, cents]) => amount(cents)), amount(bill.total),
+    [bill.id, bill.orderId, bill.chargedOn, 'USD', chargedBillStatus, ...bill.charges.map(([, cents]) => amount(cents)), amount(bill.total),
       ...(bill.originalId ? [bill.originalId, bill.reason] : [])]
   ];
   const csv = data.map(row => row.map(value => '"' + String(value).replaceAll('"', '""') + '"').join(',')).join('\r\n');
@@ -770,7 +772,7 @@ const actions = {
     dialog.close();
     draft = emptyShipment();
     units = currentState().profile.units;
-    notify('演示运单已生成 · ' + order.id);
+    notify(`演示下单成功，已模拟扣款 ${money(order.rate.total)}`);
     navigate('orders/' + order.id);
   },
   'choose-address'({ side }) {
@@ -861,16 +863,6 @@ const actions = {
     if (filters[kind].status === status) return;
     Object.assign(filters[kind], { status, page: 1 });
     updateListFilters(kind);
-  },
-  'billing-summary-filter'({ status }, button) {
-    const tools = button.closest('[data-filters]');
-    const { filters: kind } = tools.dataset;
-    Object.assign(filters[kind], { status, query: '', page: 1 });
-    tools.querySelector('input[type="search"]').value = '';
-    updateListFilters(kind);
-  },
-  'dashboard-due'({ kind }) {
-    Object.assign(filters[kind], { query: '', status: 'due', page: 1 });
   },
   'view-campaign'({ id }) {
     const campaign = campaignDetails(id);

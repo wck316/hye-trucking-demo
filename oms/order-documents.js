@@ -1,8 +1,8 @@
 import {
-  billStatuses, carrierProfiles, displayAddress, invoiceId, itemCommodities, money, orderDocuments,
+  chargedBillStatus, carrierProfiles, displayAddress, invoiceId, itemCommodities, money, orderChargeDate, orderDocuments,
   packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=campaigns';
-import { e } from './views.js?v=dashboard-hero-first';
+} from './model.js?v=zip-suggestions';
+import { e } from './views.js?v=zip-suggestions';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
@@ -38,15 +38,15 @@ function label(order) {
 }
 
 function invoice(order) {
-  const rows = [['运输费用', money(order.rate.freight)], ['附加服务', money(order.rate.accessorial)], ['合计 (USD)', money(order.rate.total)]];
-  return `<section><h2>${e(invoiceId(order))}</h2><p>出账日期 ${e(order.issued)} · ${e(billStatuses[order.billing])}</p></section>
+  const rows = [['运输费用', money(order.rate.freight)], ['附加服务', money(order.rate.accessorial)], ['已扣款金额 (USD)', money(order.rate.total)]];
+  return `<section><h2>${e(invoiceId(order))}</h2><p>扣款日期 ${e(orderChargeDate(order) || '—')} · ${chargedBillStatus}</p></section>
     <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${name}</th><td>${value}</td></tr>`).join('')}</tbody></table></section>`;
 }
 
 const documentBodies = { bol, label, invoice };
 
 export function orderDocument(order, kind) {
-  if (!order || !Object.hasOwn(documentBodies, kind) || (kind === 'invoice' && !order.issued)) return null;
+  if (!order || !Object.hasOwn(documentBodies, kind)) return null;
   const [name, description] = orderDocuments[kind];
   const title = `${name} · ${description}`;
   const carrier = carrierProfiles[order.rate.carrierId]?.name ?? '承运商未记录';

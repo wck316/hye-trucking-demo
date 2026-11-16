@@ -480,11 +480,15 @@ details[open] > .sub-disclosure > .icon { rotate: 90deg; }
 .management-list .management-record { display: inline; white-space: normal; overflow-wrap: anywhere; }
 .management-list :is(td time, .amount) { font-variant-numeric: tabular-nums; }
 .management-list .ticket-mobile-meta { display: none; }
+.bill-order-summary { overflow-wrap: anywhere; }
+.bill-order-summary small + small { margin-top: 1px; }
+.bill-order-compact { display: none; }
 @container (max-width: 700px) {
   .bill-table-original { display: none; }
 }
 @container (max-width: 580px) {
   .bill-table-order, tr:has(> .bill-table-order) > .list-table-date { display: none; }
+  .bill-order-compact { display: block; }
 }
 @container (max-width: 420px) {
   .management-list :is(th, td) { padding-inline: 10px; }
@@ -532,7 +536,7 @@ table .link { white-space: nowrap; }
 .order-empty-link .icon { width: 16px; height: 16px; }
 .order-inquiry-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 .status { display: inline-flex; align-items: center; font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 20px; background: #edf1f6; color: #46576c; }
-.status.transit, .status.picked, .status.due { background: #e5efff; color: #124aaf; }
+.status.transit, .status.picked { background: #e5efff; color: #124aaf; }
 .status.ready { background: #fff1d6; color: #805411; }
 .status.delivered, .status.paid { background: #e3f5e9; color: #176444; }
 .management-tools:is([data-filters="tickets"], [data-filters="disputes"], [data-filters="claims"]) + .management-workspace .status.pending { background: #fff1d6; color: #805411; }
@@ -635,8 +639,14 @@ a.ticket-linked-order:hover { border-color: #8daee3; background: #edf4ff; }
 .bill-detail-amount { display: grid; text-align: right; border-left: 1px solid var(--border); padding-inline-start: 10px; }
 .bill-detail-amount dt { color: var(--muted); font-size: 11px; }
 .bill-detail-amount dd { color: #173b75; font-size: 19px; line-height: 1.25; font-weight: 650; font-variant-numeric: tabular-nums; }
-.bill-detail-amount.estimate dd { color: #475b75; }
-.bill-estimate-note { background: #f4f7fa; border-radius: 6px; padding: 7px 9px; }
+.bill-disclosure { min-width: 0; border: 1px solid var(--border); border-radius: 7px; }
+.bill-disclosure > .sub-disclosure { justify-content: space-between; min-height: 44px; padding: 8px 10px; background: #f7faff; }
+.bill-disclosure > .sub-disclosure:hover { background: #eef4fc; }
+.bill-disclosure-label { display: grid; min-width: 0; gap: 2px; overflow-wrap: anywhere; }
+.bill-disclosure-label small { color: var(--muted); font-size: 12px; }
+.bill-disclosure-body { display: grid; gap: 8px; padding: 10px; border-top: 1px solid var(--border); font-size: 12px; overflow-wrap: anywhere; }
+.bill-disclosure-body > .link { justify-self: start; }
+.bill-disclosure-body .link .icon { width: 15px; height: 15px; }
 .bill-detail-actions { border-top: 1px solid var(--border); padding-top: 11px; }
 .tab-list { display: flex; gap: 12px; padding-inline: 14px; border-bottom: 1px solid var(--border); }
 .tab-list button { min-height: 38px; padding: 6px 9px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 13px; }
@@ -675,8 +685,7 @@ a.ticket-linked-order:hover { border-color: #8daee3; background: #edf4ff; }
 .management-tabs a[aria-current] { color: #0b4bd4; border-bottom-color: var(--blue); font-weight: 600; }
 .management-tabs small { margin-inline-start: 4px; font-size: 12px; }
 .billing-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; padding: 3px 0; }
-.billing-metric { display: flex; align-items: baseline; gap: 5px; padding: 4px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.billing-metric:hover { background: #edf4ff; color: #0a4bcc; }
+.billing-metric { display: flex; align-items: baseline; gap: 5px; padding: 4px 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .billing-metric strong { color: #0a4bcc; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .account-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 17px; }
 .account-fields .full { grid-column: 1 / -1; }

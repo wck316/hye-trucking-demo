@@ -1,4 +1,4 @@
-import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=campaigns';
+import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=zip-suggestions';
 
 const sides = ['origin', 'destination'];
 const number = '(\\d+(?:[,.]\\d+)*)';

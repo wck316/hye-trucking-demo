@@ -1,10 +1,44 @@
-import { addressValue, postalCode } from './model.js?v=campaigns';
+import { addressValue, postalCode } from './model.js?v=zip-suggestions';
 
 const endpoint = 'https://photon.komoot.io/api/';
 const resultLimit = 6;
 const normalize = value => value.toLowerCase().replace(/[,.#]/g, ' ').replace(/\s+/g, ' ').trim();
 const postcodeOnly = /^\d{1,5}(?:-\d{0,4})?$/;
+const zipPrefix = /^\d{1,5}$/;
 const chosenLocations = new Map();
+const geonames = { label: '© GeoNames', href: 'https://www.geonames.org/export/zip/' };
+const openStreetMap = { label: '© OpenStreetMap', href: 'https://www.openstreetmap.org/copyright' };
+let zipLocalities;
+
+function loadZipLocalities() {
+  zipLocalities ??= fetch(new URL('./map-data/zip-localities.tsv', import.meta.url), { signal: AbortSignal.timeout(6000) }).then(response => {
+    if (!response.ok) throw new Error('ZIP lookup unavailable');
+    return response.text();
+  }).then(text => {
+    const localities = new Map();
+    for (const row of text.split('\n')) {
+      const [zip, city, state] = row.split('\t');
+      if (!/^\d{5}$/.test(zip) || !city || !state) continue;
+      if (!localities.has(zip)) localities.set(zip, []);
+      localities.get(zip).push(`${city}, ${state}`);
+    }
+    return localities;
+  }).catch(error => { zipLocalities = undefined; throw error; });
+  return zipLocalities;
+}
+
+function zipMatches(localities, prefix, zipPlusFour) {
+  const matches = [];
+  for (const [zip, places] of localities) {
+    if (!zip.startsWith(prefix)) continue;
+    for (const place of places) {
+      const value = `${place} ${zipPlusFour || zip}`;
+      matches.push({ value, label: value, detail: '使用 ZIP 查价' });
+      if (matches.length === resultLimit) return matches;
+    }
+  }
+  return matches;
+}
 
 function localMatches(query, addresses) {
   const terms = normalize(query).split(' ');
@@ -67,7 +101,7 @@ export function bindAddressSuggestions(input, addresses) {
     selected = -1;
   }
 
-  function show(results, message, sourced = false) {
+  function show(results, message, source) {
     const seen = new Set();
     options = results.filter(({ value }) => {
       const key = normalize(value);
@@ -91,12 +125,12 @@ export function bindAddressSuggestions(input, addresses) {
       return item;
     }));
     status.textContent = message;
-    if (sourced) {
+    if (source) {
       const credit = document.createElement('a');
-      credit.href = 'https://www.openstreetmap.org/copyright';
+      credit.href = source.href;
       credit.target = '_blank';
       credit.rel = 'noopener noreferrer';
-      credit.textContent = '© OpenStreetMap';
+      credit.textContent = source.label;
       status.append(credit);
     }
     popup.hidden = false;
@@ -113,10 +147,46 @@ export function bindAddressSuggestions(input, addresses) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  async function searchZip(query, prefix) {
+    const controller = new AbortController();
+    request = controller;
+    const stillCurrent = () => request === controller && input.isConnected && document.activeElement === input && input.value.trim() === query;
+    const zipPlusFour = query.includes('-') ? query : '';
+    const saved = () => {
+      const places = new Map();
+      for (const { zip, city, region } of addresses) {
+        const locality = `${city}, ${region.toUpperCase()}`;
+        const existing = places.get(zip) ?? [];
+        if (!existing.includes(locality)) places.set(zip, [...existing, locality]);
+      }
+      return zipMatches(places, prefix, zipPlusFour);
+    };
+    show([], '正在查找 ZIP…');
+    try {
+      const places = await loadZipLocalities();
+      if (!stillCurrent()) return;
+      const matches = prefix.length === 5 ? zipMatches([[prefix, places.get(prefix) ?? []]], prefix, zipPlusFour)
+        : zipMatches(places, prefix, '');
+      const fallback = matches.length ? [] : saved();
+      if (matches.length) show(matches, 'ZIP 地区 ', geonames);
+      else if (fallback.length) show(fallback, '地址簿 ZIP 匹配');
+      else show([], prefix.length === 5 ? '未找到此 ZIP 的城市，可直接用 ZIP 查价。' : '暂无匹配的 ZIP。');
+    } catch {
+      if (!stillCurrent()) return;
+      const matches = saved();
+      show(matches, matches.length ? '地址簿 ZIP 匹配' : 'ZIP 联想暂不可用，可直接输入五位 ZIP 查价。');
+    }
+  }
+
   function search() {
     stopSearch();
     const query = input.value.trim();
-    if (query.length < 2 || (postcodeOnly.test(query) && postalCode(query))) { close(); return; }
+    const prefix = zipPrefix.test(query) ? query : postcodeOnly.test(query) && postalCode(query);
+    if (prefix) {
+      searchZip(query, prefix);
+      return;
+    }
+    if (query.length < 2) { close(); return; }
     const local = localMatches(query, addresses);
     if (postcodeOnly.test(query) || query.length < 4 || local.length) {
       if (local.length) show(local, '地址簿匹配');
@@ -131,7 +201,7 @@ export function bindAddressSuggestions(input, addresses) {
       const stillCurrent = () => request === controller && input.isConnected && document.activeElement === input && input.value.trim() === query;
       try {
         const matches = await onlineMatches(query, AbortSignal.any([controller.signal, AbortSignal.timeout(4500)]));
-        if (stillCurrent()) show(matches, matches.length ? '地址数据 ' : '未找到带 ZIP 的地址，可直接输入完整地址或 ZIP。', Boolean(matches.length));
+        if (stillCurrent()) show(matches, matches.length ? '地址数据 ' : '未找到带 ZIP 的地址，可直接输入完整地址或 ZIP。', matches.length ? openStreetMap : undefined);
       } catch {
         if (stillCurrent()) show([], '地址联想暂不可用，可直接输入完整地址或 ZIP。');
       }
@@ -141,7 +211,7 @@ export function bindAddressSuggestions(input, addresses) {
   input.addEventListener('input', event => { if (!event.isComposing) search(); });
   input.addEventListener('focus', () => {
     const value = input.value.trim();
-    if (!postalCode(value)) search();
+    if (!postalCode(value) || postcodeOnly.test(value)) search();
   });
   input.addEventListener('blur', event => { if (!popup.contains(event.relatedTarget)) close(); });
   popup.addEventListener('focusout', event => {
