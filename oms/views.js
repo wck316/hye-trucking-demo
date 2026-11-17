@@ -1,11 +1,12 @@
 import {
   serviceOptions, selectedServices, addressTypes, addressTypeFor, zones, unitSettings, packaging, orderStatuses, orderTypes, orderType, orderRoute, orderRecordHref, chargedBillStatus,
-  dateInZone, totals, displayAddress, shortAddress, addressValue, invoiceId, money, displayMeasurement,
-  carrierProfiles, selectedRate, quoteStatus, postalCode, stopDetailsReady, itemCommodities,
+  dateInZone, totals, displayAddress, shortAddress, addressValue, invoiceId, billingRecords, money, displayMeasurement,
+  carrierProfiles, selectedRate, quoteStatus, postalCode, stopDetailsReady, itemCommodities, itemFreightClasses,
   hazardClasses, packingGroups, hazardIdPattern, stopSupplement, cargoReady, estimatedLinearFeet, orderDocuments,
   quoteModes, shipmentMode, quoteEntry, equipmentTypes, equipmentSummary, addressContactFields, ticketStatuses, ticketCategories, billHref,
-  caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons
-} from './model.js?v=zip-suggestions';
+  caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons,
+  canClaimOrder, canRequestOrderChange, editableOrderStops, orderStopValues, orderChangeLabels, orderStopLabel
+} from './model.js?v=rebill-files';
 
 export const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -43,8 +44,11 @@ export function workflowHeader(section, quote, booked, mode) {
     rates: booked || section !== 'rates' ? '' : `<button type="button" class="btn small" data-action="refresh-rates" data-quote="${e(quote.id)}">更新报价</button>`,
     details: '<button type="button" class="btn small" data-action="fill-details-example">填入示例资料</button>'
   }[section];
+  const quoteNumber = quote && section !== 'quote'
+    ? `<span class="workflow-quote-number">询价编号 <strong>${e(quote.id)}</strong></span>`
+    : '';
   return {
-    path: `<span class="flow-title">${quoteModes[mode]}</span><nav aria-label="发货步骤"><ol class="flow-crumbs">${links}</ol></nav>`,
+    path: `<span class="flow-title">${quoteModes[mode]}</span><nav aria-label="发货步骤"><ol class="flow-crumbs">${links}</ol></nav>${quoteNumber}`,
     action
   };
 }
@@ -195,6 +199,10 @@ function cargoFields(item, units) {
     ${number('宽 (' + length + ')', 'width', displayMeasurement(item.width, lengthFactor), Math.ceil(900 * lengthFactor), units === 'metric' ? '101.6' : '40')}
     ${number('高 (' + length + ')', 'height', displayMeasurement(item.height, lengthFactor), Math.ceil(900 * lengthFactor), units === 'metric' ? '121.92' : '48')}`;
 }
+function freightClassField(value, quick = false) {
+  return `<label class="field"${quick ? ' data-quick-freight-class' : ''}><span>${quick ? 'Class（选填）' : '货运等级'}</span>
+    <select name="freightClass">${option('', '请选择', value)}${freightClasses.map(entry => option(entry, 'Class ' + entry, value)).join('')}</select></label>`;
+}
 function removeCargoButton(index, count) {
   return `<button type="button" class="icon-button" data-action="remove-cargo" data-index="${index}" aria-label="移除第 ${index + 1} 项货物"${count === 1 ? ' disabled' : ''}>${icon('close')}</button>`;
 }
@@ -214,6 +222,7 @@ function equipmentPicker(current) {
 }
 export function quoteView(shipment, units, hasAssistantDetails = false) {
   const mode = shipmentMode(shipment);
+  const classField = item => mode === 'ltl' ? freightClassField(itemCommodities(item)[0]?.freightClass, true) : '';
   return `<h1 class="sr-only" tabindex="-1">${quoteModes[mode]}询价</h1>
     <form id="quote-form" class="stack">
       <section class="panel panel-inset" aria-labelledby="route-heading">
@@ -230,9 +239,9 @@ export function quoteView(shipment, units, hasAssistantDetails = false) {
           ${field({ label: '车辆数量', name: 'vehicleCount', value: shipment.vehicleCount, type: 'number', attributes: 'min="1" step="1"', required: true })}
         </div>
       </section>` : ''}
-      <section class="panel panel-inset" aria-labelledby="cargo-heading">
+      <section class="panel panel-inset quote-cargo-panel" aria-labelledby="cargo-heading">
         <div class="panel-head"><h2 id="cargo-heading" class="panel-title">货物明细</h2>${cargoUnits(units)}</div>
-        <div class="cargo-rows">${shipment.items.map((item, index) => `<div class="cargo-row" data-cargo-row>${cargoFields(item, units)}${removeCargoButton(index, shipment.items.length)}</div>`).join('')}</div>
+        <div class="cargo-rows">${shipment.items.map((item, index) => `<div class="cargo-row${mode === 'ltl' ? ' cargo-row-with-class' : ''}" data-cargo-row>${cargoFields(item, units)}${classField(item)}${removeCargoButton(index, shipment.items.length)}</div>`).join('')}</div>
         <button type="button" class="btn small" data-action="add-cargo">${icon('plus')}添加一项货物</button>
       </section>
       <div>
@@ -383,6 +392,7 @@ const validUntil = rate => rate.expiresAt
   ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(rate.expiresAt)
   : '需更新';
 
+const arrivalDateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone: 'UTC' });
 function arrivalText(quote, rate) {
   const date = quote.shipment.pickupDate;
   if (!date || !rate.businessDays?.length) return '待确认提货日期';
@@ -392,7 +402,7 @@ function arrivalText(quote, rate) {
       arrival.setUTCDate(arrival.getUTCDate() + 1);
       if (arrival.getUTCDay() % 6) days--;
     }
-    return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone: 'UTC' }).format(arrival);
+    return arrivalDateFormat.format(arrival);
   }).join(' – ');
 }
 
@@ -400,9 +410,9 @@ function carrierName(rate) {
   return carrierProfiles[rate.carrierId]?.name ?? '承运商未记录';
 }
 
-function carrierIdentity(rate) {
+function carrierIdentity(rate, subtitle = rate.reference ?? '历史报价') {
   const carrier = carrierProfiles[rate.carrierId];
-  return `<span class="carrier-identity">${carrier?.logo ? '<img src="../assets/carriers/' + carrier.logo + '" alt="">' : ''}<span><strong>${e(carrierName(rate))}</strong><small>${e(rate.reference ?? '历史报价')}</small></span></span>`;
+  return `<span class="carrier-identity">${carrier?.logo ? '<img src="../assets/carriers/' + carrier.logo + '" alt="">' : ''}<span><strong>${e(carrierName(rate))}</strong>${subtitle ? `<small>${e(subtitle)}</small>` : ''}</span></span>`;
 }
 
 export function compareRates(rates, { carrier = '', service = '', sort = 'price-asc' } = {}) {
@@ -473,10 +483,14 @@ function shipmentOverview(quote, units, booked) {
   const completeCargo = cargoReady(shipment);
   const linearFeet = completeCargo ? estimatedLinearFeet(shipment) : Infinity;
   const showMeasurement = (value, factor) => value > 0 ? cargoNumber.format(value * factor) : '—';
-  const cargoItems = shipment.items.map(item => `<li>
-    <strong>${e(item.quantity || '—')} × ${e(packaging[item.type] ?? '包装待填')}</strong>
-    <span>${[item.length, item.width, item.height].map(value => showMeasurement(value, lengthFactor)).join(' × ')} ${length} · 单件 ${showMeasurement(item.weight, weightFactor)} ${weight}</span>
-  </li>`).join('');
+  const cargoItems = shipment.items.map(item => {
+    const classes = shipmentMode(shipment) === 'ltl' ? itemFreightClasses(item) : [];
+    return `<li>
+      <strong>${e(item.quantity || '—')} × ${e(packaging[item.type] ?? '包装待填')}</strong>
+      <span>${[item.length, item.width, item.height].map(value => showMeasurement(value, lengthFactor)).join(' × ')} ${length} · 单件 ${showMeasurement(item.weight, weightFactor)} ${weight}</span>
+      ${classes.length ? `<span>Class ${e(classes.join(' / '))}</span>` : ''}
+    </li>`;
+  }).join('');
   const stops = [['origin', 'A', '提货'], ['destination', 'B', '送货']];
   return `<aside class="panel shipment-overview" aria-labelledby="shipment-overview-heading">
     <header class="panel-head ruled"><h2 class="panel-title" id="shipment-overview-heading">运输详情</h2><a class="link" href="#${quoteEntry(shipment)}/${e(quote.id)}">${booked ? '复用运输信息' : '修改查价信息'}</a></header>
@@ -619,8 +633,9 @@ function commodityFields(commodity, index, count, itemIndex) {
     ${count > 1 ? `<div class="panel-head"><h4>货品 ${index + 1}</h4><button type="button" class="link" data-action="remove-commodity" data-index="${itemIndex}" data-commodity-index="${index}" aria-label="移除货品 ${index + 1}">移除</button></div>` : ''}
     <div class="commodity-fields">
       ${field({ label: '货品描述', name: 'commodity', value: commodity.description, attributes: 'maxlength="120"', placeholder: '例如服装' })}
+      ${field({ label: '货值申报 (USD)', name: 'declaredValue', type: 'number', value: commodity.declaredValue, attributes: 'min="0" step="0.01" inputmode="decimal"', placeholder: '例如 1250.00' })}
       ${field({ label: 'NMFC 编码', name: 'nmfc', value: commodity.nmfc, attributes: 'maxlength="20"', placeholder: '如已知请填写' })}
-      <label class="field"><span>货运等级</span><select name="freightClass">${option('', '请选择', commodity.freightClass)}${freightClasses.map(value => option(value, 'Class ' + value, commodity.freightClass)).join('')}</select></label>
+      ${freightClassField(commodity.freightClass)}
       <fieldset class="cargo-declaration"><legend>受管制货物申报</legend><div class="declaration-options">${Object.entries(regulatedCargo).map(([value, label]) => `<label><input type="checkbox" name="regulated" value="${value}"${value === 'hazmat' ? ` aria-controls="${hazmatId}"` : ''}${commodity.regulated.includes(value) ? ' checked' : ''}><span>${label}</span></label>`).join('')}</div></fieldset>
       <div class="piece-fields" role="group" aria-label="每个装运单位的内包装">
         ${selectField('内包装类型', 'pieceType', pieceTypes, commodity.pieceType)}
@@ -712,7 +727,8 @@ function cargoDetailRows(shipment, details, units = 'imperial') {
       const regulated = commodity.regulated.map(value => regulatedCargo[value]).filter(Boolean).join('、');
       const pieceType = commodity.pieceType && pieceTypes[commodity.pieceType];
       const pieces = commodity.pieceCount ? `${commodity.pieceCount} ${pieceType || '件'}` : pieceType;
-      const description = [commodity.description, commodity.nmfc && 'NMFC ' + commodity.nmfc, commodity.freightClass && 'Class ' + commodity.freightClass,
+      const declaredValue = commodity.declaredValue && '申报货值 ' + money(Math.round(Number(commodity.declaredValue) * 100));
+      const description = [commodity.description, declaredValue, commodity.nmfc && 'NMFC ' + commodity.nmfc, commodity.freightClass && 'Class ' + commodity.freightClass,
         regulated && '申报 ' + regulated, pieces && '内包装 ' + pieces + ' / 装运单位'].filter(Boolean).join(' · ');
       const hazmat = commodity.regulated.includes('hazmat') && commodity.hazmat;
       if (!hazmat) return [description];
@@ -847,7 +863,7 @@ export function dashboardView({ orders, quotes, tickets }) {
             <table aria-labelledby="dashboard-orders"><thead><tr><th scope="col">运单号 / 路线</th><th scope="col">状态</th><th scope="col">预计送达</th></tr></thead>
             <tbody>${orders.slice(0, 5).map(order => {
               const kind = orderType(order);
-              const arrival = order.status === 'delivered'
+              const arrival = ['delivered', 'cancelled'].includes(order.status)
                 ? '—'
                 : order.shipment.pickupDate && order.rate?.businessDays?.length ? e(arrivalText(order, order.rate)) : '待确认';
               return `<tr><td><a class="link" href="${e(orderRecordHref(kind, order))}">${e(order.id)}</a><small>${routeLabel(order.shipment)}</small></td>
@@ -868,18 +884,38 @@ function recordLink(href, label, selected) {
 }
 const customOrderStatuses = { inquiry: '已提交询价', ...orderStatuses };
 
+function orderListTiming(order) {
+  let timing;
+  if (order.status === 'inquiry') timing = order.shipment.pickupDate ? ['期望提货', order.shipment.pickupDate] : ['提交日期', order.date || '—'];
+  else if (order.status === 'cancelled') timing = ['', '—'];
+  else {
+    [timing] = orderOverviewSchedule(order);
+    if (timing[0] === '签收结果') timing = ['签收时间', '未记录'];
+  }
+  const [label, value, note] = timing;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `<time datetime="${e(value)}">${e(value)}</time>` : e(value);
+  return `<span class="list-cell-value">${date}</span>${label ? `<small>${e(label)}${note ? ` · ${e(note)}` : ''}</small>` : ''}`;
+}
+
 export function orderRows(orders, selectedId, kind) {
   const statuses = kind === 'custom' ? customOrderStatuses : orderStatuses;
   return orders.map(order => {
     const references = [order.details?.originReference && '提货 ' + order.details.originReference,
       order.details?.destinationReference && '送货 ' + order.details.destinationReference].filter(Boolean);
     if (!references.length && order.reference) references.push(order.reference);
+    const route = routeLabel(order.shipment);
+    const timing = orderListTiming(order);
+    const number = String(order.proNumber ?? '').trim();
+    const context = order.status === 'inquiry' ? `<span class="list-cell-preview" title="${e(order.requirements)}">${e(order.requirements || '定制询价')}</span>`
+      : `<span class="list-cell-value">${e(carrierName(order.rate ?? {}))}</span>${number ? `<small>PRO ${e(number)}</small>` : ''}`;
     return `<tr${order.id === selectedId ? ' class="table-row-selected"' : ''}>
-    <td>${recordLink(orderRecordHref(kind, order), order.id, order.id === selectedId)}${references.map(value => `<small>${e(value)}</small>`).join('')}</td>
-    <td class="order-table-route">${routeLabel(order.shipment)}</td><td>${status(order.status, statuses)}</td>
-    <td class="list-table-date">${order.shipment.pickupDate ? `<time datetime="${e(order.shipment.pickupDate)}">${e(order.shipment.pickupDate)}</time>` : '—'}</td>
+    <td>${recordLink(orderRecordHref(kind, order), order.id, order.id === selectedId)}${references.length ? `<small>${e(references.join(' · '))}</small>` : ''}
+      <div class="list-summary-narrow list-row-context">${route}</div><div class="list-summary-compact list-row-context">${context}</div></td>
+    <td class="list-table-medium">${route}</td><td class="list-table-wide">${context}</td>
+    <td class="list-table-status">${status(order.status, statuses)}<div class="list-summary-narrow list-row-context">${timing}</div></td>
+    <td class="list-table-medium list-table-time">${timing}</td>
   </tr>`;
-  }).join('') || emptyRow(4, kind === 'custom' ? '没有符合条件的定制服务记录' : '没有符合条件的运单');
+  }).join('') || emptyRow(5, kind === 'custom' ? '没有符合条件的定制服务记录' : '没有符合条件的运单');
 }
 function billOrderCargo(order) {
   const { shipment } = order;
@@ -891,34 +927,180 @@ export function billRows(bills, selectedId, { type, ordersById }) {
   return bills.map(bill => {
     const order = ordersById.get(bill.orderId);
     const kind = order ? orderType(order) : 'ltl';
+    const orderLink = `<a class="link" href="${e(orderRecordHref(kind, { id: bill.orderId }))}">${e(bill.orderId)}</a>`;
     const summary = order ? `<small>${routeLabel(order.shipment)}</small><small>${e([quoteModes[kind] ?? orderTypes[kind], billOrderCargo(order)].filter(Boolean).join(' · '))}</small>` : '';
+    const date = bill.chargedOn ? `<time datetime="${e(bill.chargedOn)}">${e(bill.chargedOn)}</time>` : '—';
+    const cause = bill.reason || bill.charges.map(([label]) => label).join('、');
+    const reason = `<span class="list-cell-preview" title="${e(cause)}">${e(cause || '—')}</span>`;
     return `<tr${bill.id === selectedId ? ' class="table-row-selected"' : ''}>
-    <td>${recordLink(billHref(bill), bill.id, bill.id === selectedId)}${bill.originalId ? `<small>${e(bill.charges[0]?.[0])}</small>` : ''}
-      ${summary ? `<div class="bill-order-summary bill-order-compact">${summary}</div>` : ''}</td>
-    ${bill.originalId ? `<td class="bill-table-original"><a class="link" href="#billing/${e(bill.orderId)}">${e(bill.originalId)}</a></td>` : ''}
-    <td class="bill-table-order"><a class="link" href="${e(orderRecordHref(kind, { id: bill.orderId }))}">${e(bill.orderId)}</a><div class="bill-order-summary">${summary}</div></td>
-    <td class="list-table-date">${bill.chargedOn ? `<time datetime="${e(bill.chargedOn)}">${e(bill.chargedOn)}</time>` : '—'}</td>
-    <td class="list-table-amount"><strong class="amount">${money(bill.total)}</strong></td>
-    <td>${chargedStatus}</td>
+    <td>${recordLink(billHref(bill), bill.id, bill.id === selectedId)}${bill.originalId ? `<small>原账单 <a class="link" href="#billing/${e(bill.orderId)}">${e(bill.originalId)}</a></small>` : ''}
+      <div class="list-summary-narrow list-row-context">${orderLink}${summary}</div>
+      ${bill.originalId ? `<div class="list-summary-compact list-row-context">${reason}</div>` : ''}</td>
+    <td class="list-table-medium">${orderLink}${summary}</td>
+    ${bill.originalId ? `<td class="list-table-wide">${reason}</td>` : ''}
+    <td class="list-table-medium list-table-time">${date}</td>
+    <td class="list-table-amount"><strong class="amount">${money(bill.total)}</strong><small class="list-summary-narrow">${date}</small></td>
   </tr>`;
-  }).join('') || emptyRow(type === 'rebills' ? 6 : 5, type === 'rebills' ? '没有符合条件的补收账单' : '没有符合条件的账单');
+  }).join('') || emptyRow(type === 'rebills' ? 5 : 4, type === 'rebills' ? '没有符合条件的补收账单' : '没有符合条件的账单');
 }
 function tracking(order) {
-  const stages = Object.entries(orderStatuses);
+  if (order.status === 'cancelled') return '';
+  const stages = Object.entries(orderStatuses).filter(([id]) => id !== 'cancelled');
   const progress = stages.findIndex(([id]) => id === order.status);
-  const descriptions = ['已收到运输需求，等待提货', '货物已交给承运商', '货物正在运往送货地点', '货物已完成签收'];
-  return '<ol class="timeline">' + stages.map(([id, name], index) =>
-    `<li${index <= progress ? ' class="done"' : ''}${id === order.status ? ' aria-current="step"' : ''}><strong>${name}</strong><small>${index <= progress ? descriptions[index] : '待更新'}</small></li>`
-  ).join('') + '</ol>';
+  return `<ol class="order-progress" aria-label="运输节点">${stages.map(([id, name], index) =>
+    `<li${index <= progress ? ' class="done"' : ''}${id === order.status ? ' aria-current="step"' : ''}><span class="order-progress-dot" aria-hidden="true"></span><span>${name}</span></li>`
+  ).join('')}</ol>`;
 }
-function orderOverview(order) {
-  const returned = Boolean(order.podReceived);
-  const podStatus = returned ? '已回传' : order.status === 'delivered' ? '待回传' : '待签收';
-  const podMessage = returned ? `回传日期 ${e(order.podReceived)}` : order.status === 'delivered' ? '等待承运商回传签收凭证' : '签收后更新回单状态';
-  return `<section class="detail-block"><h3 class="subhead">承运商</h3><div class="order-carrier">${carrierIdentity(order.rate)}<span class="note">${e(order.rate.name || order.rate.days)}</span></div></section>
-    <section class="detail-block"><h3 class="subhead">轨迹动态</h3>${tracking(order)}</section>
-    <section class="detail-block"><div class="panel-head"><h3 class="subhead">返单动态</h3><span class="status${returned ? ' paid' : ''}">${podStatus}</span></div><p class="note">${podMessage}</p></section>
-    <section class="detail-block"><div class="panel-head"><h3 class="subhead">账单状态</h3>${chargedStatus}</div><a class="link" href="#billing/${e(order.id)}">查看关联账单 ${icon('arrow')}</a></section>`;
+
+function orderOverviewSchedule(order) {
+  if (order.status === 'cancelled') return [['运输状态', '运单已取消。']];
+  if (order.status === 'delivered') {
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(order.deliveredAt);
+    const delivered = new Date(order.deliveredAt ?? NaN);
+    if (!Number.isFinite(delivered.getTime())) return [['签收结果', '已签收']];
+    if (dateOnly) return [['签收日期', order.deliveredAt]];
+    return [['签收时间', new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' }).format(delivered)]];
+  }
+  const { shipment, rate, details } = order;
+  const eta = shipment.pickupDate && rate.businessDays?.length ? arrivalText(order, rate) : '待确认';
+  if (order.status !== 'ready') return [['预计送达', eta]];
+  const time = shipment.pickupTime && [shipment.pickupTime, details?.pickupEnd].filter(Boolean).join('–');
+  return [['计划提货', shipment.pickupDate || '待确认', shipment.pickupDate && time ? `${time}（当地）` : ''], ['预计送达', eta]];
+}
+
+function orderOverview(order, tickets, claim) {
+  const { shipment, rate } = order;
+  const proNumber = String(order.proNumber ?? '').trim();
+  const pending = tickets.filter(ticket => ticket.status !== 'closed');
+  const resolved = tickets.filter(ticket => ticket.status === 'closed');
+  const needsAttention = ticket => ticket.customerActionRequired === true || ticket.orderChange?.side === 'cancel' || ticket.orderChange?.addressChange;
+  const priority = pending.filter(needsAttention).sort((first, second) => Number(second.customerActionRequired === true) - Number(first.customerActionRequired === true));
+  const endpoint = (side, pin, label) => `<div class="order-overview-stop"><span class="overview-pin${side === 'destination' ? ' destination' : ''}" aria-hidden="true">${pin}</span><div><span class="note">${label}</span><strong>${e(shortAddress(shipment[side]) || '—')}</strong></div></div>`;
+  return `<div class="order-overview">
+    <section class="order-overview-schedule" aria-label="运输时间和进度">
+      <dl class="order-overview-times">${orderOverviewSchedule(order).map(([label, value, note]) =>
+        `<div><dt>${label}</dt><dd><strong>${e(value)}</strong>${note ? `<small class="note">${e(note)}</small>` : ''}</dd></div>`
+      ).join('')}</dl>${tracking(order)}
+    </section>
+    ${orderOverviewActivity(priority, '需关注', true)}
+    <section class="order-overview-section" aria-labelledby="order-overview-route-title">
+      <h3 class="subhead" id="order-overview-route-title">运输概况</h3>
+      <div class="order-overview-route">${endpoint('origin', 'A', '提货地')}${icon('arrow', 'order-overview-arrow')}${endpoint('destination', 'B', '送货地')}</div>
+      <dl class="order-overview-carrier">
+        <div><dt class="note">承运商</dt><dd>${carrierIdentity(rate, rate.name || rate.days || '')}</dd></div>
+        <div class="order-overview-pro"><dt class="note">PRO 号</dt><dd${proNumber ? ' class="order-pro-number"' : ' class="note"'}>${e(proNumber || (order.status === 'cancelled' ? '未记录' : '待回传'))}</dd></div>
+      </dl>
+    </section>
+    ${orderOverviewActivity(pending.filter(ticket => !needsAttention(ticket)), '变更申请')}
+    ${orderOverviewActivity(resolved, '变更记录')}
+    ${claim?.status === 'closed' ? `<a class="link order-claim-history" href="${e(caseHref(claim))}">查看索赔记录 ${icon('arrow')}</a>` : ''}
+  </div>`;
+}
+
+function orderChangeStatus(ticket) {
+  if (ticket.orderChange.result === 'approved') return '<span class="status paid">审核通过</span>';
+  if (ticket.orderChange.result === 'rejected') return '<span class="status closed">审核驳回</span>';
+  if (ticket.status === 'closed') return '<span class="status closed">已撤回</span>';
+  return '<span class="status ready">待审核</span>';
+}
+
+function ticketStatusBadge(ticket) {
+  if (ticket.customerActionRequired === true && ticket.status !== 'closed') return '<span class="status ready">需你处理</span>';
+  return ticket.orderChange ? orderChangeStatus(ticket) : status(ticket.status, ticketStatuses);
+}
+
+function orderChangeDiff(plan, historical = false) {
+  if (plan.side === 'cargo') {
+    return `<div class="order-cargo-compare">${[[historical ? '修改前' : '当前生效', plan.beforeItems], ['申请改为', plan.afterItems]].map(([label, items]) =>
+      `<section><h3 class="subhead">${label}</h3>${detailList(cargoDetailRows({ items }))}</section>`
+    ).join('')}</div>`;
+  }
+  if (plan.side === 'cancel') return detailList([
+    ['申请时状态', e(orderStatuses[plan.status])], ['取消原因', e(plan.reason || '未填写')]
+  ]);
+  return `<div class="order-change-diff"><table>
+    <thead><tr><th scope="col">变更项目</th><th scope="col">${historical ? '修改前' : '当前生效'}</th><th scope="col">申请改为</th></tr></thead>
+    <tbody>${plan.changes.map(({ key, before, after }) => {
+      const display = value => e((key === 'addressType' ? addressTypes[value] : value) || '未填写');
+      return `<tr><th scope="row">${e(orderChangeLabels[key])}</th><td>${display(before)}</td><td>${display(after)}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function orderOverviewActivity(tickets, title, priority = false) {
+  if (!tickets.length) return '';
+  return `<section class="order-overview-section${priority ? ' order-overview-attention' : ''}"><h3 class="subhead">${title}</h3><div class="order-change-list">
+    ${tickets.map(ticket => `<div class="order-change-record">
+      <a class="link order-change-ticket" href="${e(caseHref(ticket))}" aria-label="查看工单 ${e(ticket.id)} · ${e(ticket.subject)}">${e(ticket.subject)}</a>
+      ${ticketStatusBadge(ticket)}
+      ${ticket.orderChange && ticket.status !== 'closed' ? `<details class="order-change-disclosure"><summary class="sub-disclosure" aria-label="查看申请内容">详情 ${icon('chev')}</summary>${orderChangeDiff(ticket.orderChange)}</details>` : ''}
+    </div>`).join('')}</div></section>`;
+}
+
+const orderChangePaneLabel = side => side === 'cargo' ? '货物明细' : `${orderStopLabel(side)}信息`;
+
+export function orderChangeEditor(order, initialSide, drafts, cargoDraft) {
+  const editable = editableOrderStops(order);
+  const forms = editable.map(side => {
+    const values = { ...orderStopValues(order, side), ...drafts[side] };
+    const label = orderStopLabel(side);
+    const editField = (name, attributes, type = 'text') => field({ label: orderChangeLabels[name], name, value: values[name], type, attributes });
+    return `<form class="order-change-form" id="order-change-${side}" data-order-change-form="${side}"${side === initialSide ? '' : ' hidden'}>
+      <section class="detail-block" aria-label="${label}地址">
+        <h3 class="subhead">${label}地址</h3>
+        ${field({ label: orderChangeLabels.address, name: 'address', value: values.address, placeholder: '街道、城市、州、ZIP', attributes: 'maxlength="220"', required: true })}
+        <div class="order-change-fields">
+          ${selectField(orderChangeLabels.addressType, 'addressType', addressTypeOptions, values.addressType)}
+          ${editField('Unit', 'maxlength="30"')}
+        </div>
+      </section>
+      <section class="detail-block" aria-label="${label}交接信息">
+        <h3 class="subhead">交接信息</h3>
+        <div class="order-change-fields">
+          ${editField('Company', 'maxlength="100"')}
+          ${editField('Contact', 'maxlength="70"')}
+          ${editField('Phone', 'maxlength="40"', 'tel')}
+          ${editField('PhoneExtension', 'maxlength="15" inputmode="numeric"')}
+          ${editField('Email', 'maxlength="100"', 'email')}
+          ${editField('Reference', 'maxlength="60"')}
+        </div>
+        <label class="field"><span>${orderChangeLabels.Notes}</span><textarea name="Notes" rows="2" maxlength="500">${e(values.Notes)}</textarea></label>
+      </section>
+      <p class="error" role="alert" data-order-change-error></p>
+      <div class="actions end"><button class="btn primary" type="submit">核对变更</button></div>
+    </form>`;
+  }).join('');
+  const cargo = `<form class="order-change-form" id="order-change-cargo" data-order-change-form="cargo"${initialSide === 'cargo' ? '' : ' hidden'}>
+      ${cargoEditor({ ...order, shipment: { ...order.shipment, items: cargoDraft.items } }, cargoDraft.units)}
+      <p class="error" role="alert" data-order-change-error></p>
+      <div class="actions end"><button class="btn primary" type="submit">核对变更</button></div>
+    </form>`;
+  const options = `<div class="segmented order-change-side" role="group" aria-label="选择修改内容">${[...editable, 'cargo'].map(side =>
+    `<button type="button" data-action="order-change-side" data-side="${side}" aria-controls="order-change-${side}" aria-pressed="${side === initialSide}">${orderChangePaneLabel(side)}</button>`
+  ).join('')}</div>`;
+  return `<p class="order-change-context"><strong>${e(order.id)}</strong>${status(order.status, orderStatuses)}</p>
+    <p class="note">审核通过后，提交的修改才会更新到运单。</p>${options}${forms}${cargo}`;
+}
+
+export function orderChangeReview(order, plan) {
+  const impact = plan.side === 'cargo' ? '货物明细变更可能影响费用和运输安排，具体影响由客服和承运商审核确认。'
+    : plan.addressChange ? '调整地址可能影响费用、时效或附加服务，具体影响由客服和承运商审核确认。' : '';
+  return `<p class="order-change-context"><strong>${e(order.id)}</strong><span class="note">${orderChangePaneLabel(plan.side)}</span></p>
+    ${orderChangeDiff(plan)}
+    <p class="note">提交后会创建审核工单。审核通过后，申请的修改才会更新到运单。</p>
+    ${impact ? `<div class="notice"><strong>当前已扣款 ${money(order.rate.total)} USD</strong><p>${impact}</p></div>` : ''}
+    <p class="error" role="alert" data-order-change-error></p>
+    <div class="actions end"><button class="btn" type="button" data-action="back-order-change">返回编辑</button><button class="btn primary" type="button" data-action="submit-order-change">提交审核</button></div>`;
+}
+
+export function orderCancellationForm(order) {
+  return `<form id="cancel-order-form" class="order-change-form" data-order="${e(order.id)}" data-status="${e(order.status)}">
+    <p class="order-change-context"><strong>${e(order.id)}</strong>${status(order.status, orderStatuses)}</p>
+    ${detailList([['运输线路', routeLabel(order.shipment)], ['当前已扣款', money(order.rate.total) + ' USD']])}
+    <div class="notice"><p>审核通过后才会取消运单。${order.status === 'ready' ? '' : '货物已交给承运商，能否停止运输由审核确认。'}费用和退款安排将在工单中通知。</p></div>
+    <label class="field"><span>取消原因（选填）</span><textarea name="reason" rows="3" maxlength="500" placeholder="例如收货方调整了计划"></textarea></label>
+    <p class="error" role="alert" data-order-change-error></p>
+    <div class="actions end"><button class="btn" type="button" data-action="close-dialog">返回运单</button><button class="btn primary" type="submit">提交取消申请</button></div>
+  </form>`;
 }
 
 function orderInformation(order) {
@@ -934,9 +1116,20 @@ function orderInformation(order) {
 }
 
 function orderFiles(order) {
-  return `<ul class="order-files">${Object.entries(orderDocuments).map(([kind, [name, label]]) => {
-    return `<li><div class="order-file-name">${icon('bill')}<div><strong>${name}</strong><p class="note">${label}${kind === 'invoice' ? ' · ' + e(invoiceId(order)) : ''}</p></div></div>
-      <div class="actions"><button class="link" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="preview" aria-label="预览 ${name}">预览</button><button class="btn small" type="button" data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}" data-mode="download" aria-label="下载 ${name}">下载</button></div></li>`;
+  const rebills = billingRecords([order]).filter(bill => bill.originalId);
+  const files = Object.keys(orderDocuments).flatMap(kind => kind === 'rebill'
+    ? rebills.map(bill => ({ kind, billId: bill.id }))
+    : [{ kind }]);
+  return `<ul class="order-files">${files.map(({ kind, billId }) => {
+    const [name, label] = orderDocuments[kind];
+    const available = kind !== 'pod' || Boolean(order.podReceived);
+    const title = e(billId ? `${name} ${billId}` : name);
+    const fileAttributes = `data-action="order-file" data-order="${e(order.id)}" data-kind="${kind}"${billId ? ` data-bill="${e(billId)}"` : ''}`;
+    const actions = available ? `<div class="actions"><button class="link" type="button" ${fileAttributes} data-mode="preview" aria-label="预览 ${title}">预览</button><button class="btn small" type="button" ${fileAttributes} data-mode="download" aria-label="下载 ${title}">下载</button></div>`
+      : `<span class="status">${{ delivered: '待回传', cancelled: '已取消' }[order.status] ?? '待签收'}</span>`;
+    const reference = billId ?? (kind === 'invoice' ? invoiceId(order) : kind === 'pod' ? order.podReceived : '');
+    return `<li><div class="order-file-name">${icon('bill')}<div><strong>${name}</strong><p class="note">${label}${reference ? ' · ' + e(reference) : ''}</p></div></div>
+      ${actions}</li>`;
   }).join('')}</ul>`;
 }
 
@@ -950,15 +1143,23 @@ function tabPanels(scope, sections, activeTab, className) {
   return Object.entries(sections).map(([tab, content]) => `<div class="${className}" id="${scope}-panel-${tab}" role="tabpanel" aria-labelledby="${scope}-tab-${tab}" tabindex="0"${tab === activeTab ? '' : ' hidden'}>${content}</div>`).join('');
 }
 
-function caseEntry(kind, record, existing) {
-  const isClaim = kind === 'claims';
-  const label = isClaim ? '查看索赔' : '查看申诉';
-  if (existing && existing.status !== 'closed') return `<a class="btn small" href="${e(caseHref(existing))}">${label} · ${ticketStatuses[existing.status]}</a>`;
-  const button = `<button class="btn small" type="button" data-action="new-case" data-kind="${kind}" data-record="${e(record.id)}">${caseTypes[kind].action}</button>`;
-  return button + (existing ? `<a class="link" href="${e(caseHref(existing))}">${label}记录</a>` : '');
+function orderActionText(label, shortLabel) {
+  return `<span class="order-action-full">${label}</span><span class="order-action-short" aria-hidden="true">${shortLabel}</span>`;
 }
 
-export function orderDetail(order, activeTab, totalCount, claim, kind) {
+function caseEntry(kind, record, existing, shortLabel = '') {
+  const isClaim = kind === 'claims';
+  const label = isClaim ? '查看索赔' : '查看申诉';
+  if (existing && existing.status !== 'closed') {
+    const statusLabel = `${label} · ${ticketStatuses[existing.status]}`;
+    return `<a class="btn small" href="${e(caseHref(existing))}"${shortLabel ? ` aria-label="${e(statusLabel)}" title="${e(statusLabel)}"` : ''}>${shortLabel ? orderActionText(label, shortLabel) : statusLabel}</a>`;
+  }
+  const action = caseTypes[kind].action;
+  const button = `<button class="btn small" type="button" data-action="new-case" data-kind="${kind}" data-record="${e(record.id)}"${shortLabel ? ` aria-label="${action}"` : ''}>${shortLabel ? orderActionText(action, shortLabel) : action}</button>`;
+  return button + (existing && !shortLabel ? `<a class="link" href="${e(caseHref(existing))}">${label}记录</a>` : '');
+}
+
+export function orderDetail(order, activeTab, totalCount, claim, kind, changes) {
   const title = kind === 'custom' ? '定制服务详情' : '运单详情';
   if (!order) {
     const emptyMessage = totalCount ? '没有符合条件的记录'
@@ -979,9 +1180,16 @@ export function orderDetail(order, activeTab, totalCount, claim, kind) {
       </div>`;
     return managementDetail('定制询价详情', body, order.id, status(order.status, customOrderStatuses));
   }
-  const sections = { overview: orderOverview(order), details: orderInformation(order), files: orderFiles(order) };
-  const actions = `<button class="btn small" type="button" data-action="new-ticket" data-order="${e(order.id)}">${icon('plus')} 创建工单</button>` + (order.status !== 'ready' ? caseEntry('claims', order, claim) : '');
-  const controls = `<div class="management-detail-controls">${tabList('order', '运单详情标签', orderTabs, activeTab)}<div class="actions">${actions}</div></div>`;
+  const sections = { overview: orderOverview(order, changes, claim), details: orderInformation(order), files: orderFiles(order) };
+  const canEdit = canRequestOrderChange(order);
+  const edit = canEdit ? `<button class="btn order-edit-action" type="button" data-action="edit-order" data-order="${e(order.id)}" aria-label="修改订单" aria-haspopup="dialog">${orderActionText('修改订单', '修改')}</button>` : '';
+  const cancel = canEdit ? `<button class="link order-cancel-action" type="button" data-action="cancel-order" data-order="${e(order.id)}" aria-label="取消订单" aria-haspopup="dialog">${orderActionText('取消订单', '取消')}</button>` : '';
+  const claims = canClaimOrder(order) ? caseEntry('claims', order, claim, '索赔') : '';
+  const controls = `<div class="order-toolbar">${tabList('order', '运单详情标签', orderTabs, activeTab)}
+    <div class="order-toolbar-actions" role="group" aria-label="运单操作">${edit}
+      <button class="link" type="button" data-action="new-ticket" data-order="${e(order.id)}" aria-label="创建工单" aria-haspopup="dialog">${orderActionText('创建工单', '工单')}</button>${claims}${cancel}
+    </div>
+  </div>`;
   return managementDetail(title, tabPanels('order', sections, activeTab, 'detail-body order-tab-body'),
     order.id, status(order.status, orderStatuses), controls);
 }
@@ -1093,32 +1301,42 @@ export function paginationControls(kind, { page, size, pageCount, total, offset,
   </footer>`;
 }
 
-export function ordersView(result, filter, detail, totalCount, activeTab, counts, claim, kind) {
+export function ordersView(result, filter, detail, totalCount, activeTab, counts, claim, kind, changes) {
   return managementPage({
     title: '订单管理', kind, label: orderTypes[kind] + '列表', result,
     tabs: managementTabs('运输类型', Object.entries(orderTypes).map(([key, label]) => [key, orderRoute(key), label]), kind),
     toolbar: kind === 'custom'
       ? managementToolbar(customOrderStatuses, filter, counts, '搜索记录编号、线路或需求')
-      : managementToolbar(orderStatuses, filter, counts, '搜索运单号、参考号或线路'),
-    headers: [kind === 'custom' ? '记录编号' : '运单号', ['运输线路', 'order-table-route'], '状态',
-      [kind === 'custom' ? '提货日期（当地）' : '提货日期', 'list-table-date']],
-    rows: orderRows(result.rows, detail?.id, kind), detail: orderDetail(detail, activeTab, totalCount, claim, kind)
+      : managementToolbar(orderStatuses, filter, counts, '搜索运单号、PRO、参考号或线路'),
+    headers: [kind === 'custom' ? '记录编号' : '运单号', ['提送货路线', 'list-table-medium'],
+      [kind === 'custom' ? '需求 / 承运商' : '承运商 / PRO', 'list-table-wide'], ['状态', 'list-table-status'], ['关键时间', 'list-table-medium list-table-time']],
+    rows: orderRows(result.rows, detail?.id, kind), detail: orderDetail(detail, activeTab, totalCount, claim, kind, changes)
   });
 }
 
 const ticketDateFormat = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 function ticketTime(timestamp) {
-  return `<time datetime="${new Date(timestamp).toISOString()}">${ticketDateFormat.format(timestamp)}</time>`;
+  const date = new Date(timestamp ?? NaN);
+  return Number.isFinite(date.getTime()) ? `<time datetime="${date.toISOString()}">${ticketDateFormat.format(date)}</time>` : '—';
 }
 export function ticketRows(tickets, selectedId, kind = 'tickets') {
   return tickets.map(ticket => {
     const selected = ticket.id === selectedId;
     const category = e(caseCategory(ticket));
-    const order = e(ticket.billId || ticket.orderId);
+    const record = ticket.billId || ticket.orderId;
+    const related = record ? `<span class="list-cell-value">${e(record)}</span>${ticket.billId && ticket.orderId ? `<small>${e(ticket.orderId)}</small>` : ''}` : '—';
+    const message = ticket.messages?.at(-1);
+    const text = message?.text?.trim() || (message?.files?.length ? `添加了 ${message.files.length} 个凭证` : '');
+    const author = { customer: '你', support: '客服', system: '系统' }[message?.by];
+    const summary = text && [author, text].filter(Boolean).join(' · ');
+    const activity = summary ? `<small class="list-cell-preview" title="${e(summary)}">${e(summary)}</small>` : '';
+    const updated = ticketTime(ticket.updatedAt ?? message?.at);
     return `<tr${selected ? ' class="table-row-selected"' : ''}>
-      <td>${recordLink(caseHref(ticket), ticket.subject, selected)}<small>${e(ticket.id)}</small><small class="ticket-mobile-meta">${category}${order ? ` · ${order}` : ''}</small></td>
-      <td class="ticket-table-context">${category}${order ? `<small>${order}</small>` : ''}</td>
-      <td>${status(ticket.status, ticketStatuses)}</td><td class="list-table-date">${ticketTime(ticket.updatedAt)}</td>
+      <td>${recordLink(caseHref(ticket), ticket.subject, selected)}<small>${e(ticket.id)}${category ? ` · ${category}` : ''}</small>
+        ${record ? `<div class="list-summary-compact list-row-context">${related}</div>` : ''}<div class="list-summary-narrow">${activity}</div></td>
+      <td class="list-table-wide">${related}</td>
+      <td class="list-table-status">${ticketStatusBadge(ticket)}<small class="list-summary-narrow">${updated}</small></td>
+      <td class="list-table-medium ticket-table-activity">${updated}${activity}</td>
     </tr>`;
   }).join('') || emptyRow(4, '没有符合条件的' + caseTypes[kind].label);
 }
@@ -1140,9 +1358,10 @@ export function ticketDetail(ticket, order, emptyMessage, kind, bill) {
   const body = `<div class="detail-body">
     <section class="detail-block ticket-context">
       <div><h3 class="subhead">${e(ticket.subject)}</h3><p class="note">${e(caseCategory(ticket))}</p></div>
-      ${order ? `<a class="ticket-linked-order" href="#orders/${e(order.id)}">${icon('order')}<span><strong>${e(order.id)}</strong><small>${routeLabel(order.shipment)}</small></span>${icon('chev')}</a>` : ''}
+      ${order ? `<a class="ticket-linked-order" href="${e(orderRecordHref(orderType(order), order))}">${icon('order')}<span><strong>${e(order.id)}</strong><small>${routeLabel(order.shipment)}</small></span>${icon('chev')}</a>` : ''}
     </section>
     ${rows.length ? `<section class="detail-block">${detailList(rows)}</section>` : ''}
+    ${ticket.orderChange ? `<section class="detail-block"><h3 class="subhead">申请内容</h3>${orderChangeDiff(ticket.orderChange, ticket.status === 'closed')}</section>` : ''}
     <section class="detail-block" aria-labelledby="ticket-activity-heading"><h3 class="subhead" id="ticket-activity-heading">沟通记录</h3>
       <ol class="ticket-activity">${ticket.messages.map(message => `<li class="ticket-message ${message.by === 'support' ? 'ticket-message-support' : ''}">
         <div class="panel-head"><strong>${names[message.by]}</strong><span class="note">${ticketTime(message.at)}</span></div>${message.text ? `<p>${e(message.text)}</p>` : ''}
@@ -1153,10 +1372,10 @@ export function ticketDetail(ticket, order, emptyMessage, kind, bill) {
       <label class="field"><span>补充说明</span><textarea name="reply" rows="2" ${kind === 'tickets' ? 'required' : ''} maxlength="2000" placeholder="输入要补充的信息"></textarea></label>
       ${kind === 'tickets' ? '' : evidenceField()}
       <p class="error" role="alert" id="ticket-reply-error"></p>
-      <div class="panel-head"><button class="link ticket-close" type="button" data-action="close-ticket" data-id="${e(ticket.id)}">关闭${kind === 'tickets' ? '工单' : kind === 'claims' ? '索赔' : '申诉'}</button><button class="btn primary small" type="submit">添加回复</button></div>
+      <div class="panel-head"><button class="link ticket-close" type="button" data-action="close-ticket" data-id="${e(ticket.id)}">${ticket.orderChange ? '撤回申请' : '关闭' + (kind === 'tickets' ? '工单' : kind === 'claims' ? '索赔' : '申诉')}</button><button class="btn primary small" type="submit">添加回复</button></div>
     </form>`}
   </div>`;
-  return managementDetail(title, body, ticket.id, status(ticket.status, ticketStatuses));
+  return managementDetail(title, body, ticket.id, ticketStatusBadge(ticket));
 }
 
 export function ticketsView(result, filter, selected, order, counts, emptyMessage, kind, bill) {
@@ -1167,7 +1386,7 @@ export function ticketsView(result, filter, selected, order, counts, emptyMessag
     tabs: managementTabs('工单与申诉类型', Object.entries(caseTypes).map(([key, tab]) => [key, caseRoute(key), tab.label]), kind),
     toolbar: managementToolbar(ticketStatuses, filter, counts, search,
       `<button class="btn primary small" type="button" data-action="${kind === 'tickets' ? 'new-ticket' : 'new-case'}" data-kind="${kind}">${icon('plus')} ${action}</button>`),
-    headers: ['主题', ['类型 / 关联记录', 'ticket-table-context'], '状态', ['最近更新', 'list-table-date']],
+    headers: ['主题 / 编号', [kind === 'disputes' ? '关联账单 / 运单' : '关联运单', 'list-table-wide'], ['处理状态', 'list-table-status'], ['最近动态', 'list-table-medium ticket-table-activity']],
     rows: ticketRows(result.rows, selected?.id, kind), detail: ticketDetail(selected, order, emptyMessage, kind, bill)
   });
 }
@@ -1225,9 +1444,9 @@ export function billingView(billing, result, selected, dispute) {
   return managementPage({
     title: '账单管理', kind: type, label: rebills ? '补收账单列表' : '账单列表', result,
     tabs: managementTabs('账单类型', [['bills', '#billing', 'Bills <small>账单</small>'], ['rebills', '#billing/rebills', 'Rebills <small>补收账单</small>']], type, summary),
-    toolbar: managementToolbar(null, filter, null, '搜索账单号、运单号或运输路线'),
-    headers: [rebills ? '补收账单号' : '账单号', ...(rebills ? [['原账单号', 'bill-table-original']] : []),
-      ['订单摘要', 'bill-table-order'], ['扣款日期', 'list-table-date'], ['金额 (USD)', 'list-table-amount'], '状态'],
+    toolbar: managementToolbar(null, filter, null, '搜索账单号、运单号、费用项或路线'),
+    headers: [rebills ? '补收账单号' : '账单号', ['运单 / 摘要', 'list-table-medium'], ...(rebills ? [['补收原因', 'list-table-wide']] : []),
+      ['扣款日期', 'list-table-medium list-table-time'], [rebills ? '补收金额 (USD)' : '已扣款 (USD)', 'list-table-amount']],
     rows: billRows(result.rows, selected?.id, billing), detail: billDetail(selected, billing, dispute)
   });
 }

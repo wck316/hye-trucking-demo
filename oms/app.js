@@ -2,24 +2,27 @@ import {
   currentState, emptyShipment, exampleShipment, emptyItem, saveQuote, bookOrder, saveProfile,
   saveAddress, removeAddress, postalCode, addressValue, unitSettings, chargedBillStatus, billingRecords, billHref, money,
   displayMeasurement, updateQuote, refreshQuote, chooseRate, quoteStatus, pricingReady, detailsReady, hasStreetAddress,
-  addressTypes, shortAddress, stopDetailsReady, cargoReady, emptyCommodity, hazardDeclarationsReady, stopHoursReady,
+  addressTypes, shortAddress, stopDetailsReady, cargoReady, emptyCommodity, itemCommodities, hazardDeclarationsReady, stopHoursReady,
   shipmentMode, quoteEntry, quoteModes, orderTypes, orderType, orderRoute, orderRecordHref, saveCustomRequest, addressContactFields, createDemoApiKey, revokeDemoApiKey,
-  createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase
-} from './model.js?v=zip-suggestions';
+  createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase,
+  canClaimOrder, canRequestOrderChange, editableOrderStops, planOrderChange, planOrderCargoChange, planOrderCancellation, submitOrderChange
+} from './model.js?v=rebill-files';
 import {
   quoteView, ratesView, ordersView, billingView, accountView, dashboardView, campaignDetails, orderRows, billRows, billDetail,
   addressRows, addressForm, icon, e, detailsView, quoteSummary, confirmationView, carrierQuotes, workflowHeader,
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
-  apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult
-} from './views.js?v=zip-suggestions';
+  apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
+  orderChangeEditor, orderChangeReview, orderCancellationForm
+} from './views.js?v=management-table-content';
 import { renderRouteMap } from './route-map.js?v=zip-suggestions';
-import { orderDocument } from './order-documents.js?v=zip-suggestions';
-import { bindAddressSuggestions } from './address-search.js?v=zip-prefix';
-import { createSatelliteDrawer } from './satellite-preview.js?v=zip-prefix';
-import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=zip-suggestions';
+import { orderDocument } from './order-documents.js?v=management-table-content';
+import { bindAddressSuggestions } from './address-search.js?v=rebill-files';
+import { createSatelliteDrawer } from './satellite-preview.js?v=rebill-files';
+import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=rebill-files';
 import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
 
 const workspace = document.querySelector('#workspace');
+const workspaceScrolls = () => getComputedStyle(workspace).overflowY === 'auto';
 const breadcrumb = document.querySelector('#breadcrumb');
 const toolbarAction = document.querySelector('#workflow-action');
 const dialog = document.querySelector('#dialog');
@@ -49,6 +52,7 @@ let customDraft = emptyCustomDraft();
 let toastTimer;
 let activeOrderId;
 let activeOrderTab = 'overview';
+let orderChangeDraft;
 let activeTicketId;
 let activeBillId;
 let activeAccountTab = 'profile';
@@ -112,8 +116,8 @@ function orderFilterResults({ records, filter }) {
   const term = filter.query.trim().toLowerCase();
   const searched = records.filter(record => [
     record.id, record.reference, record.details?.originReference, record.details?.destinationReference,
-    record.shipment.origin, record.shipment.destination, record.requirements
-  ].some(field => field?.toLowerCase().includes(term)));
+    record.shipment.origin, record.shipment.destination, record.requirements, record.proNumber
+  ].some(field => String(field ?? '').toLowerCase().includes(term)));
   return statusFilterResults(searched, filter.status);
 }
 
@@ -145,7 +149,7 @@ function billFilterResults({ bills, filter, ordersById }) {
   const term = filter.query.trim().toLowerCase();
   return bills.filter(bill => {
     const shipment = ordersById.get(bill.orderId)?.shipment;
-    return [bill.id, bill.orderId, bill.originalId, bill.reason, shipment?.origin, shipment?.destination]
+    return [bill.id, bill.orderId, bill.originalId, bill.reason, ...bill.charges.map(([label]) => label), shipment?.origin, shipment?.destination]
       .some(value => value?.toLowerCase().includes(term));
   });
 }
@@ -181,6 +185,9 @@ function updateBillFilter({ orders, tickets }) {
   }
 }
 
+const orderOverviewTickets = (tickets, order) => tickets.filter(ticket => ticket.orderId === order?.id && (ticket.orderChange
+  || (caseKind(ticket) === 'disputes' && ticket.status !== 'closed' && ticket.customerActionRequired === true)));
+
 function renderOrders({ tickets }, listing) {
   const { kind, records, filter, requested } = listing;
   let { matches, counts } = orderFilterResults(listing);
@@ -191,7 +198,7 @@ function renderOrders({ tickets }, listing) {
   const result = paginate(matches, filter, requested);
   const selected = requested ?? result.rows[0];
   activeOrderId = selected?.id;
-  return ordersView(result, filter, selected, records.length, activeOrderTab, counts, latestCase(tickets, 'claims', selected?.id), kind);
+  return ordersView(result, filter, selected, records.length, activeOrderTab, counts, latestCase(tickets, 'claims', selected?.id), kind, orderOverviewTickets(tickets, selected));
 }
 
 function updateOrderFilter(state) {
@@ -206,7 +213,7 @@ function updateOrderFilter(state) {
   if (selected?.id === activeOrderId) return;
   activeOrderId = selected?.id;
   const detail = workspace.querySelector('.management-detail');
-  detail.innerHTML = orderDetail(selected, activeOrderTab, records.length, latestCase(state.tickets, 'claims', selected?.id), kind);
+  detail.innerHTML = orderDetail(selected, activeOrderTab, records.length, latestCase(state.tickets, 'claims', selected?.id), kind, orderOverviewTickets(state.tickets, selected));
   if (requested) history.replaceState(null, '', selected ? orderRecordHref(kind, selected) : orderRoute(kind));
 }
 
@@ -278,7 +285,7 @@ function openTicket(ticket) {
 }
 
 function caseRecords(state, kind) {
-  return kind === 'disputes' ? billingRecords(state.orders) : state.orders.filter(order => order.status !== 'ready');
+  return kind === 'disputes' ? billingRecords(state.orders) : state.orders.filter(canClaimOrder);
 }
 
 async function saveCaseChanges(form, commit, error, after) {
@@ -390,7 +397,7 @@ function render(moveFocus = false, message = '') {
   const categoryTab = categoryHadFocus ? workspace.querySelector('.management-tabs [aria-current]') : null;
   const target = detail ?? categoryTab ?? workspace.querySelector('h1');
   target.focus({ preventScroll: true });
-  if (detail && innerWidth <= 1080) detail.closest('.detail').scrollIntoView();
+  if (detail && workspaceScrolls()) detail.closest('.detail').scrollIntoView();
   else {
     const nextList = workspace.querySelector('.management-tools')?.dataset.filters;
     const sameList = detail && previousList && previousList === nextList;
@@ -430,7 +437,7 @@ function readStops(fields) {
   };
 }
 
-function readCargo(form, previousItems, displayUnits = units) {
+function readCargo(form, previousItems, displayUnits = units, legacyDescription = '') {
   const { weightFactor, lengthFactor } = unitSettings[displayUnits];
   return Array.from(form.querySelectorAll('[data-cargo-row]'), (row, index) => {
     const previous = previousItems[index] ?? emptyItem();
@@ -445,12 +452,17 @@ function readCargo(form, previousItems, displayUnits = units) {
       const value = name => entry.querySelector('[name="' + name + '"]').value.trim();
       const hazmat = Object.fromEntries(Array.from(entry.querySelectorAll('[data-hazmat] [name]'), input => [input.name, input.value.trim()]));
       return {
-        description: value('commodity'), nmfc: value('nmfc'), freightClass: value('freightClass'),
+        description: value('commodity'), declaredValue: value('declaredValue'), nmfc: value('nmfc'), freightClass: value('freightClass'),
         regulated: Array.from(entry.querySelectorAll('[name="regulated"]:checked'), input => input.value),
         pieceType: value('pieceType'), pieceCount: value('pieceCount'),
         ...(Object.values(hazmat).some(Boolean) ? { hazmat } : {})
       };
     });
+    const quickClass = row.querySelector('[data-quick-freight-class] select');
+    if (quickClass && (quickClass.value || previous.commodities?.length)) {
+      const [first = emptyCommodity(), ...other] = itemCommodities(previous, index === 0 ? legacyDescription : '');
+      commodities.push({ ...first, freightClass: quickClass.value }, ...other);
+    }
     return {
       ...previous,
       type: read('type'), quantity: read('quantity') === '' ? '' : Number(read('quantity')),
@@ -482,7 +494,9 @@ function readShipment() {
   if (!form) return draft;
   const fields = new FormData(form);
   const ftl = shipmentMode(draft) === 'ftl' ? { equipment: fields.get('equipment'), vehicleCount: Number(fields.get('vehicleCount')) } : {};
-  return { ...draft, ...readStops(fields), ...ftl, pickupDate: fields.get('pickupDate'), items: readCargo(form, draft.items) };
+  const legacyDescription = draftId ? findQuote(draftId)?.details?.commodity : '';
+  const items = readCargo(form, draft.items, units, legacyDescription);
+  return { ...draft, ...readStops(fields), ...ftl, pickupDate: fields.get('pickupDate'), items };
 }
 
 function analyzeAssistant(form) {
@@ -515,6 +529,48 @@ function showDialog(title, content, mode = '') {
   dialog.querySelector('#dialog-title').focus();
 }
 
+function showOrderChangeEditor() {
+  const { order, side, values, cargo } = orderChangeDraft;
+  showDialog('修改订单', orderChangeEditor(order, side, values, cargo), 'order-change');
+}
+
+const orderChangeCargoForm = () => dialog.open && dialog.querySelector('#order-change-cargo:not([hidden])');
+const cargoScope = () => orderChangeCargoForm() || workspace;
+
+function readOrderChangeCargo(form) {
+  const { order, cargo } = orderChangeDraft;
+  return readCargo(form, cargo.items, cargo.units, order.details?.commodity);
+}
+
+function reviewOrderChange(form) {
+  const { order, cargo } = orderChangeDraft;
+  const side = form.dataset.orderChangeForm;
+  cargo.items = readOrderChangeCargo(dialog.querySelector('#order-change-cargo'));
+  const plan = side === 'cargo' ? planOrderCargoChange(order, cargo.items) : planOrderChange(order, side, textFields(form));
+  if (plan.error) {
+    form.querySelector('[data-order-change-error]').textContent = plan.error;
+    return;
+  }
+  const stopForms = dialog.querySelectorAll('[data-order-change-form]:not(#order-change-cargo)');
+  orderChangeDraft.values = Object.fromEntries([...stopForms].map(node => [node.dataset.orderChangeForm, textFields(node)]));
+  orderChangeDraft.plan = plan;
+  orderChangeDraft.side = side;
+  showDialog('核对订单变更', orderChangeReview(order, plan), 'order-change');
+}
+
+function sendOrderChange(orderId, plan) {
+  const { ticket, error } = plan.error ? plan : submitOrderChange(orderId, plan);
+  if (error) {
+    dialog.querySelector('[data-order-change-error]').textContent = error;
+    return;
+  }
+  dialog.close();
+  activeOrderTab = 'overview';
+  render();
+  workspace.querySelector(`.order-change-record a[href="${caseHref(ticket)}"]`)?.focus();
+  notify(plan.side === 'cancel' ? '取消申请已提交审核' : '变更申请已提交审核');
+}
+
 function downloadBill(bill) {
   if (!bill) return;
   const amount = cents => (cents / 100).toFixed(2);
@@ -535,7 +591,7 @@ function downloadBill(bill) {
 }
 
 function focusCargo(index) {
-  workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[name="quantity"]')?.focus();
+  cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[name="quantity"]')?.focus();
 }
 
 function saveDetails(form = workspace.querySelector('#details-form'), editItems) {
@@ -555,6 +611,15 @@ function saveDetails(form = workspace.querySelector('#details-form'), editItems)
 }
 
 function editCargo(editItems, nextUnits) {
+  const changeForm = orderChangeCargoForm();
+  if (changeForm) {
+    const { order, cargo } = orderChangeDraft;
+    cargo.items = readOrderChangeCargo(changeForm);
+    editItems?.(cargo.items);
+    cargo.units = nextUnits ?? cargo.units;
+    changeForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ ...order, shipment: { ...order.shipment, items: cargo.items } }, cargo.units);
+    return cargo.items;
+  }
   const customForm = workspace.querySelector('#custom-quote-form');
   if (customForm) {
     customDraft = readCustomDraft(customForm);
@@ -580,9 +645,9 @@ function editCargo(editItems, nextUnits) {
   return draft.items;
 }
 
-function updateCargoMetrics(shipment, displayUnits = units) {
-  workspace.querySelector('#cargo-total').textContent = cargoTotalsText(shipment, displayUnits);
-  workspace.querySelectorAll('[data-cargo-metrics]').forEach((entry, index) => {
+function updateCargoMetrics(shipment, displayUnits = units, scope = workspace) {
+  scope.querySelector('#cargo-total').textContent = cargoTotalsText(shipment, displayUnits);
+  scope.querySelectorAll('[data-cargo-metrics]').forEach((entry, index) => {
     entry.textContent = cargoItemMetrics(shipment.items[index], displayUnits);
   });
 }
@@ -689,16 +754,16 @@ const actions = {
   },
   'add-commodity'({ index }) {
     editCargo(items => items[index].commodities.push(emptyCommodity()));
-    workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-commodity]:last-of-type [name="commodity"]')?.focus();
+    cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-commodity]:last-of-type [name="commodity"]')?.focus();
   },
   'remove-commodity'({ index, commodityIndex }) {
     editCargo(items => items[index].commodities.splice(Number(commodityIndex), 1));
-    workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-action="add-commodity"]')?.focus();
+    cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-action="add-commodity"]')?.focus();
   },
-  units({ units: selection }) {
-    if (workspace.querySelector(`[data-units="${selection}"]`).getAttribute('aria-pressed') === 'true') return;
+  units({ units: selection }, button) {
+    if (button.getAttribute('aria-pressed') === 'true') return;
     editCargo(undefined, selection);
-    workspace.querySelector(`[data-units="${selection}"]`).focus();
+    cargoScope().querySelector(`[data-units="${selection}"]`)?.focus();
   },
   'fill-details-example'() {
     const form = workspace.querySelector('#details-form');
@@ -871,6 +936,30 @@ const actions = {
   'list-page'({ list, page }) {
     changeListPage(list, Number(page));
   },
+  'edit-order'({ order: id }) {
+    const order = currentState().orders.find(entry => entry.id === id);
+    const [side] = editableOrderStops(order);
+    if (!side) return;
+    orderChangeDraft = { order, side, values: {}, cargo: { items: order.shipment.items, units } };
+    showOrderChangeEditor();
+  },
+  'cancel-order'({ order: id }) {
+    const order = currentState().orders.find(entry => entry.id === id);
+    if (canRequestOrderChange(order)) showDialog('申请取消订单', orderCancellationForm(order), 'order-change');
+  },
+  'order-change-side'({ side }) {
+    for (const button of dialog.querySelectorAll('[data-action="order-change-side"]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.side === side));
+    }
+    for (const form of dialog.querySelectorAll('[data-order-change-form]')) form.hidden = form.dataset.orderChangeForm !== side;
+    orderChangeDraft.side = side;
+  },
+  'back-order-change'() { showOrderChangeEditor(); },
+  'submit-order-change'() {
+    if (!orderChangeDraft?.plan) return;
+    const { order, plan } = orderChangeDraft;
+    sendOrderChange(order.id, plan);
+  },
   'new-ticket'({ order: id }) {
     const { orders } = currentState();
     const order = orders.find(order => order.id === id);
@@ -906,19 +995,23 @@ const actions = {
     }
   },
   'close-ticket'({ id }) {
-    showDialog('关闭记录', `<p>关闭后将结束这条记录的沟通。确认关闭吗？</p><div class="actions end"><button class="btn" type="button" data-action="close-dialog">取消</button><button class="btn primary" type="button" data-action="confirm-close-ticket" data-id="${e(id)}">确认关闭</button></div>`);
+    const ticket = currentState().tickets.find(entry => entry.id === id);
+    const cancelChange = Boolean(ticket?.orderChange);
+    const title = cancelChange ? '撤回申请' : '关闭记录';
+    const message = cancelChange ? '撤回后将结束这次变更审核。' : '关闭后将结束这条记录的沟通。确认关闭吗？';
+    showDialog(title, `<p>${message}</p><div class="actions end"><button class="btn" type="button" data-action="close-dialog">取消</button><button class="btn primary" type="button" data-action="confirm-close-ticket" data-id="${e(id)}">${cancelChange ? '确认撤回' : '确认关闭'}</button></div>`);
   },
   'confirm-close-ticket'({ id }) {
     const ticket = updateTicket(id);
     dialog.close();
     if (ticket) {
       openTicket(ticket);
-      notify(caseTypes[caseKind(ticket)].label + '已关闭');
+      notify(ticket.orderChange ? '变更申请已撤回' : caseTypes[caseKind(ticket)].label + '已关闭');
     }
   },
-  'order-file'({ order: id, kind, mode }) {
+  'order-file'({ order: id, kind, mode, bill }) {
     const order = currentState().orders.find(order => order.id === id);
-    const file = orderDocument(order, kind);
+    const file = orderDocument(order, kind, bill);
     if (!file) return;
     const url = URL.createObjectURL(new Blob([file.html], { type: 'text/html;charset=utf-8' }));
     const link = document.createElement('a');
@@ -957,6 +1050,14 @@ function saveShipment() {
 const textFields = form => Object.fromEntries(Array.from(new FormData(form), ([key, value]) => [key, value.trim()]));
 
 const submits = {
+  'cancel-order-form'(form) {
+    const order = currentState().orders.find(entry => entry.id === form.dataset.order);
+    if (order?.status !== form.dataset.status) {
+      form.querySelector('[data-order-change-error]').textContent = '运单状态已更新，请关闭后重新打开核对。';
+      return;
+    }
+    sendOrderChange(form.dataset.order, planOrderCancellation(order, form.elements.reason.value));
+  },
   'quote-assistant-form'(form) {
     const { result, shipment } = analyzeAssistant(form);
     const panel = dialog.querySelector('#quote-assistant-result');
@@ -1089,7 +1190,7 @@ document.addEventListener('click', event => {
   }
   const link = event.target.closest('a[href^="#"]');
   if (!link) return;
-  if (link.closest('.management-list') && link.hash === location.hash && innerWidth <= 1080) {
+  if (link.closest('.management-list') && link.hash === location.hash && workspaceScrolls()) {
     workspace.querySelector('#detail-title').focus({ preventScroll: true });
     workspace.querySelector('.management-detail').scrollIntoView();
   }
@@ -1124,6 +1225,11 @@ window.addEventListener('resize', hideServiceHelp);
 
 document.addEventListener('submit', event => {
   const form = event.target;
+  if (form.dataset.orderChangeForm) {
+    event.preventDefault();
+    reviewOrderChange(form);
+    return;
+  }
   if (!Object.hasOwn(submits, form.id)) return;
   event.preventDefault();
   submits[form.id](form);
@@ -1165,6 +1271,17 @@ dialog.addEventListener('change', event => {
 });
 
 dialog.addEventListener('input', event => {
+  const form = event.target.closest('[data-order-change-form], #cancel-order-form');
+  if (form) {
+    form.querySelector('[data-order-change-error]').textContent = '';
+    if (form.id === 'order-change-cargo') {
+      toggleHazmat(event.target);
+      if (event.target.closest('.cargo-row')) {
+        updateCargoMetrics({ items: readOrderChangeCargo(form) }, orderChangeDraft.cargo.units, form);
+      }
+    }
+    return;
+  }
   if (!event.target.matches('#quote-assistant-form textarea')) return;
   assistantDescriptions.set(location.hash, event.target.value);
   dialog.querySelector('#quote-assistant-result').hidden = true;
@@ -1205,8 +1322,9 @@ workspace.addEventListener('input', event => {
 menuButton.addEventListener('click', () => setMenu(menuButton.getAttribute('aria-expanded') === 'false'));
 shade.addEventListener('click', () => { setMenu(false); menuButton.focus(); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && serviceHelpAnchor) hideServiceHelp();
-  if (event.key === 'Escape' && document.body.classList.contains('nav-open')) {
+  if (event.key !== 'Escape') return;
+  if (serviceHelpAnchor) hideServiceHelp();
+  if (document.body.classList.contains('nav-open')) {
     setMenu(false);
     menuButton.focus();
   }
@@ -1226,6 +1344,7 @@ workspace.addEventListener('keydown', event => {
 
 dialog.addEventListener('close', () => {
   if (dialog.querySelector('#api-key-value')) dialog.innerHTML = '';
+  if (dialog.dataset.mode === 'order-change' && !dialog.open) orderChangeDraft = undefined;
 });
 
 window.addEventListener('hashchange', () => {

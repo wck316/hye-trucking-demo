@@ -61,8 +61,9 @@ export const packingGroups = { I: 'I', II: 'II', III: 'III' };
 export const hazardIdPattern = '(?:[Uu][Nn]|[Nn][Aa]) *[0-9]{4}';
 const hazardIdFormat = new RegExp('^' + hazardIdPattern + '$');
 export const orderStatuses = {
-  ready: '待提货', picked: '已提货', transit: '运输中', delivered: '已签收'
+  ready: '待提货', picked: '已提货', transit: '运输中', delivered: '已签收', cancelled: '已取消'
 };
+export const canClaimOrder = order => ['picked', 'transit', 'delivered'].includes(order?.status);
 export const orderTypes = { ltl: 'LTL', ftl: 'FTL', custom: '定制服务' };
 export const orderType = order => order.shipment.mode === 'custom' ? 'custom' : shipmentMode(order.shipment);
 export const orderRoute = kind => kind === 'ltl' ? '#orders' : '#orders/' + kind;
@@ -70,7 +71,7 @@ export const orderRecordHref = (kind, record) => orderRoute(kind) + '/' + record
 export const chargedBillStatus = '已扣款';
 export const ticketStatuses = { pending: '待处理', processing: '处理中', closed: '已关闭' };
 export const ticketCategories = {
-  tracking: '运输跟踪', stops: '提送货问题', billing: '账单费用', documents: '文件与回单', damage: '货损理赔', other: '其他'
+  tracking: '运输跟踪', stops: '提送货问题', 'order-change': '订单变更', billing: '账单费用', documents: '文件与回单', damage: '货损理赔', other: '其他'
 };
 export const caseTypes = {
   tickets: { label: '普通工单', action: '创建工单', prefix: 'TK-' },
@@ -92,7 +93,7 @@ export function latestCase(tickets, kind, value) {
   return tickets.find(ticket => caseKind(ticket) === kind && ticket[key] === value && ticket.status !== 'closed')
     ?? tickets.find(ticket => caseKind(ticket) === kind && ticket[key] === value);
 }
-export const orderDocuments = { bol: ['BOL', '提单'], label: ['Label', '货运标签'], invoice: ['Invoice', '账单'] };
+export const orderDocuments = { bol: ['BOL', '提单'], label: ['Label', '货运标签'], pod: ['POD', '签收回单'], invoice: ['Invoice', '账单'], rebill: ['Rebill', '补收账单'] };
 export const money = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 export const postalCode = value => value.match(/\b(\d{5})(?:-\d{4})?(?:(?:,\s*|\s+)(?:US|USA|United States))?\s*$/i)?.[1] ?? '';
 export const displayAddress = address => address.replace(/^.*? · /, '');
@@ -121,11 +122,16 @@ export function emptyItem() {
 }
 
 export function emptyCommodity() {
-  return { description: '', nmfc: '', freightClass: '', regulated: [], pieceType: '', pieceCount: '' };
+  return { description: '', declaredValue: '', nmfc: '', freightClass: '', regulated: [], pieceType: '', pieceCount: '' };
 }
 
 export function itemCommodities(item, legacyDescription = '') {
   return item.commodities ?? [{ ...emptyCommodity(), description: legacyDescription }];
+}
+
+export function itemFreightClasses(item) {
+  const classes = itemCommodities(item).map(commodity => commodity.freightClass).filter(Boolean);
+  return [...new Set(classes)].sort((first, second) => Number(first) - Number(second));
 }
 
 export function emptyShipment(mode = 'ltl') {
@@ -241,8 +247,13 @@ function pricingSnapshot(shipment) {
     zip: postalCode(shipment[side]), type: addressTypeFor(shipment, side),
     services: selectedServices(shipment, side).map(service => service.id)
   });
-  const items = shipment.items.map(({ type, quantity, weight, length, width, height }) => ({ type, quantity, weight, length, width, height }));
-  const equipment = shipmentMode(shipment) === 'ftl' ? { type: shipment.equipment, count: shipment.vehicleCount } : undefined;
+  const isFtl = shipmentMode(shipment) === 'ftl';
+  const items = shipment.items.map(item => {
+    const { type, quantity, weight, length, width, height } = item;
+    const classes = isFtl ? [] : itemFreightClasses(item);
+    return { type, quantity, weight, length, width, height, ...(classes.length ? { classes } : {}) };
+  });
+  const equipment = isFtl ? { type: shipment.equipment, count: shipment.vehicleCount } : undefined;
   return { origin: stop('origin'), destination: stop('destination'), items, equipment };
 }
 
@@ -405,6 +416,16 @@ export function billingRecords(orders) {
 export const billHref = bill => bill.originalId ? `#billing/rebills/${bill.id}` : `#billing/${bill.orderId}`;
 const idFor = prefix => prefix + Array.from(crypto.getRandomValues(new Uint8Array(5)), byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
 const storageKey = 'hye-oms-client-demo-v1';
+const demoProNumbers = new Map([
+  ['HYE-DEMO-101', 'DEMO-0101'],
+  ['HYE-DEMO-102', 'DEMO-0102'],
+  ['HYE-DEMO-103', 'DEMO-0103']
+]);
+
+function withDemoProNumber(order) {
+  const sample = demoProNumbers.get(order.id);
+  return sample && !String(order.proNumber ?? '').trim() ? { ...order, proNumber: sample } : order;
+}
 
 function seedTickets(orders) {
   const examples = [
@@ -443,9 +464,24 @@ function seed() {
     shipment: quote.shipment,
     rate: quote.rates[index === 2 ? 0 : 1],
     status: statuses[index],
-    ...(index === 2 ? { podReceived: dateInZone(defaultZone, -7) } : {}),
+    ...(index === 2 ? { podReceived: dateInZone(defaultZone, -7), details: { destinationPhone: '+1 704 555 0102' } } : {}),
     date: quote.date
-  }));
+  })).map(withDemoProNumber);
+  const reviewedOrder = orders[2];
+  const requestedAt = Date.parse(`${reviewedOrder.shipment.pickupDate}T15:00:00Z`);
+  const reviewedAt = requestedAt + 3600000;
+  const reviewedChange = {
+    id: 'TK-DEMO-104', orderId: reviewedOrder.id, category: 'order-change', subject: '送货交接信息变更申请',
+    status: 'closed', createdAt: requestedAt, updatedAt: reviewedAt,
+    orderChange: {
+      side: 'destination', addressChange: false, result: 'approved',
+      changes: [{ key: 'Phone', before: '+1 704 555 0101', after: reviewedOrder.details.destinationPhone }]
+    },
+    messages: [
+      { by: 'customer', text: '请更新收货仓库的现场联系电话。', at: requestedAt },
+      { by: 'support', text: '审核通过，送货联系电话已更新。', at: reviewedAt }
+    ]
+  };
   const pending = priceQuote({ id: 'QT-DEMO-104', stage: 'compare' },
     lane('90001', '95131', 1));
   const continuing = priceQuote({ id: 'QT-DEMO-105', stage: 'details', selectedRateId: 'standard' },
@@ -459,7 +495,7 @@ function seed() {
     addresses: demoAddresses,
     quotes: [continuing, pending, ...quotes],
     orders,
-    tickets: seedTickets(orders)
+    tickets: [...seedTickets(orders), reviewedChange]
   };
 }
 
@@ -469,7 +505,7 @@ export function currentState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
     if (saved?.profile && Array.isArray(saved.orders) && Array.isArray(saved.quotes) && Array.isArray(saved.addresses)) {
-      memory = Array.isArray(saved.tickets) ? saved : { ...saved, tickets: seedTickets(saved.orders) };
+      memory = { ...saved, orders: saved.orders.map(withDemoProNumber), tickets: Array.isArray(saved.tickets) ? saved.tickets : seedTickets(saved.orders) };
     }
   } catch {
     // The current session stays usable if the browser denies local storage.
@@ -495,7 +531,7 @@ export function validateCase(state, { kind = 'tickets', subject, category, order
     if (existing && existing.status !== 'closed') return '该账单已有进行中的申诉。';
   }
   if (kind === 'claims') {
-    const order = state.orders.find(entry => entry.id === orderId && entry.status !== 'ready');
+    const order = state.orders.find(entry => entry.id === orderId && canClaimOrder(entry));
     if (!order) return '请选择已提货的运单。';
     if (requestedAmount && (!/^\d{1,9}(?:\.\d{1,2})?$/.test(requestedAmount) || Number(requestedAmount) <= 0)) return '请填写有效的索赔金额。';
     const existing = latestCase(state.tickets, kind, orderId);
@@ -505,7 +541,7 @@ export function validateCase(state, { kind = 'tickets', subject, category, order
   return '';
 }
 
-export function createTicket({ kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description }, files = []) {
+export function createTicket({ kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description, orderChange }, files = []) {
   const state = currentState();
   if (validateCase(state, { kind, subject, category, orderId, billId, charge, requestedAmount, description })) return;
   if (kind === 'disputes') orderId = billingRecords(state.orders).find(bill => bill.id === billId).orderId;
@@ -514,6 +550,7 @@ export function createTicket({ kind = 'tickets', subject, category, orderId, bil
     id: idFor(caseTypes[kind].prefix), kind, subject, category, orderId, status: 'pending', createdAt: at, updatedAt: at,
     ...(kind === 'disputes' ? { billId, charge } : {}),
     ...(kind === 'claims' && requestedAmount ? { requestedAmount: Math.round(Number(requestedAmount) * 100) } : {}),
+    ...(orderChange ? { orderChange } : {}),
     messages: [{ by: 'customer', text: description, at, files }]
   };
   persist({ ...state, tickets: [ticket, ...state.tickets] });
@@ -526,7 +563,8 @@ export function updateTicket(id, reply = '', files = []) {
   if (!ticket || ticket.status === 'closed') return;
   const at = Date.now();
   const responding = Boolean(reply || files.length);
-  const entry = responding ? { by: 'customer', text: reply, at, files } : { by: 'system', text: caseTypes[caseKind(ticket)].label + '已关闭', at };
+  const entry = responding ? { by: 'customer', text: reply, at, files }
+    : { by: 'system', text: ticket.orderChange ? '变更申请已撤回' : caseTypes[caseKind(ticket)].label + '已关闭', at };
   const updated = { ...ticket, status: responding ? ticket.status : 'closed', updatedAt: at, messages: [...ticket.messages, entry] };
   persist({ ...state, tickets: state.tickets.map(ticket => ticket.id === id ? updated : ticket) });
   return updated;
@@ -594,6 +632,97 @@ export function bookOrder(quoteId) {
   };
   persist({ ...state, orders: [order, ...state.orders] });
   return order;
+}
+
+export const orderChangeLabels = {
+  address: '街道地址', addressType: '地址类型', Company: '公司名称', Unit: '套间 / 单元',
+  Contact: '现场联系人', Phone: '联系电话', PhoneExtension: '分机号', Email: '联系邮箱', Reference: '参考单号 / 交接码', Notes: '交接备注'
+};
+export const orderStopLabel = side => side === 'origin' ? '提货' : '送货';
+export const canRequestOrderChange = order => ['ready', 'picked', 'transit'].includes(order?.status);
+export function editableOrderStops(order) {
+  if (order?.status === 'ready') return sides;
+  return canRequestOrderChange(order) ? ['destination'] : [];
+}
+
+export function orderStopValues(order, side) {
+  const { shipment, details = {} } = order;
+  const { reference, notes } = stopSupplement(details, side);
+  return {
+    address: displayAddress(shipment[side]).trim(), addressType: addressTypeFor(shipment, side) ?? '',
+    Company: details[side + 'Company'] ?? '', Unit: details[side + 'Unit'] ?? '',
+    Contact: details[side + 'Contact'] ?? '', Phone: details[side + 'Phone'] ?? '',
+    PhoneExtension: details[side + 'PhoneExtension'] ?? '', Email: details[side + 'Email'] ?? '', Reference: reference, Notes: notes
+  };
+}
+
+export function planOrderChange(order, side, input) {
+  if (!editableOrderStops(order).includes(side)) return { error: '这个运输节点已无法通过此入口修改。' };
+  const current = orderStopValues(order, side);
+  const changes = Object.keys(current).flatMap(key => {
+    const after = input[key]?.trim();
+    return after === undefined || after === current[key] ? [] : [{ key, before: current[key], after }];
+  });
+  if (!changes.length) return { error: '请先修改至少一项信息。' };
+  const addressChange = changes.some(({ key }) => key === 'address' || key === 'addressType');
+  const { address, addressType } = { ...current, ...input };
+  if (addressChange && (!hasStreetAddress(address) || !Object.hasOwn(addressTypes, addressType))) {
+    return { error: '请填写包含街道和五位 ZIP 的完整地址，并选择地址类型。' };
+  }
+  return { side, changes, addressChange };
+}
+
+function orderCargoSnapshot(items, legacyDescription = '') {
+  return items.map(({ type, quantity, weight, length, width, height, ...item }, index) => {
+    const commodities = itemCommodities(item, index === 0 ? legacyDescription : '').map(commodity => {
+      const { description = '', declaredValue = '', nmfc = '', freightClass = '', regulated = [], pieceType = '', pieceCount = '', hazmat } = commodity;
+      return {
+        description, declaredValue, nmfc, freightClass, regulated: [...regulated].sort(), pieceType, pieceCount,
+        ...(regulated.includes('hazmat') && hazmat ? { hazmat: Object.fromEntries(Object.entries(hazmat).sort()) } : {})
+      };
+    }).filter(commodity => Object.values(commodity).some(value => Array.isArray(value) ? value.length : value));
+    return { type, quantity, weight, length, width, height, commodities };
+  });
+}
+
+export function planOrderCargoChange(order, items) {
+  if (!canRequestOrderChange(order)) return { error: '此运单已无法提交货物明细变更。' };
+  const shipment = { ...order.shipment, items };
+  if (!cargoReady(shipment) || !hazardDeclarationsReady(shipment)) return { error: '请检查货物件数、重量、尺寸和危险品申报。' };
+  const beforeItems = orderCargoSnapshot(order.shipment.items, order.details?.commodity);
+  const afterItems = orderCargoSnapshot(items, order.details?.commodity);
+  if (JSON.stringify(beforeItems) === JSON.stringify(afterItems)) return { error: '请先修改至少一项货物信息。' };
+  return { side: 'cargo', beforeItems, afterItems };
+}
+
+export function planOrderCancellation(order, reason) {
+  if (!canRequestOrderChange(order)) return { error: '此运单已无法申请取消。' };
+  return { side: 'cancel', status: order.status, reason: reason.trim() };
+}
+
+export function submitOrderChange(orderId, plan) {
+  const state = currentState();
+  const order = state.orders.find(entry => entry.id === orderId);
+  const { side, changes } = plan;
+  const current = side === 'cargo' ? planOrderCargoChange(order, plan.afterItems)
+    : side === 'cancel' ? planOrderCancellation(order, plan.reason)
+    : planOrderChange(order, side, Object.fromEntries(changes.map(({ key, after }) => [key, after])));
+  if (current.error || JSON.stringify(current) !== JSON.stringify(plan)) {
+    return { error: '订单信息已更新，请关闭后重新打开核对。' };
+  }
+  const submittedFields = new Set(changes?.map(({ key }) => key));
+  const overlappingRequest = state.tickets.some(ticket => ticket.orderId === orderId && ticket.status !== 'closed'
+    && ticket.orderChange?.side === side && (!changes || ticket.orderChange.changes?.some(({ key }) => submittedFields.has(key))));
+  if (overlappingRequest) {
+    const subject = side === 'cancel' ? '此运单已有待审核的取消申请。' : side === 'cargo' ? '货物明细已有待审核的变更申请。' : '这些字段已有待审核的变更申请。';
+    return { error: `${subject}请从运单总览查看申请，或撤回后重新提交。` };
+  }
+  const [subject, description] = side === 'cargo' ? ['货物明细变更申请', '请审核货物明细变更，并确认费用及运输安排。']
+    : side === 'cancel' ? ['取消订单申请', '请审核是否可以取消此运单，并确认相关费用和退款安排。']
+    : [`${orderStopLabel(side)}${current.addressChange ? '地址' : '交接信息'}变更申请`, current.addressChange
+      ? '请审核地址变更，并确认费用和送达时效。' : '请审核并更新此运单的交接信息。'];
+  const ticket = createTicket({ orderId, category: 'order-change', subject, description, orderChange: current });
+  return ticket ? { ticket } : { error: '变更申请提交失败，请重新核对后再试。' };
 }
 
 export function saveProfile(profile) {

@@ -1,5 +1,5 @@
-import { displayAddress, hasStreetAddress, postalCode } from './model.js?v=zip-suggestions';
-import { locateStreetAddress } from './address-search.js?v=zip-prefix';
+import { displayAddress, hasStreetAddress, postalCode } from './model.js?v=rebill-files';
+import { locateStreetAddress } from './address-search.js?v=rebill-files';
 import { loadZipPoints } from './route-map.js?v=zip-suggestions';
 
 const imageryTiles = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';

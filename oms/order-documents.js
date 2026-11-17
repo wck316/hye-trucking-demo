@@ -1,8 +1,8 @@
 import {
-  chargedBillStatus, carrierProfiles, displayAddress, invoiceId, itemCommodities, money, orderChargeDate, orderDocuments,
+  chargedBillStatus, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
   packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=zip-suggestions';
-import { e } from './views.js?v=zip-suggestions';
+} from './model.js?v=rebill-files';
+import { e } from './views.js?v=management-table-content';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
@@ -37,21 +37,31 @@ function label(order) {
     <section><h2>装运件数</h2><p>${e(totals(order.shipment).quantity)} 件</p></section>`;
 }
 
-function invoice(order) {
-  const rows = [['运输费用', money(order.rate.freight)], ['附加服务', money(order.rate.accessorial)], ['已扣款金额 (USD)', money(order.rate.total)]];
-  return `<section><h2>${e(invoiceId(order))}</h2><p>扣款日期 ${e(orderChargeDate(order) || '—')} · ${chargedBillStatus}</p></section>
-    <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${name}</th><td>${value}</td></tr>`).join('')}</tbody></table></section>`;
+function billDocument(bill) {
+  const rows = [...bill.charges, ['已扣款金额 (USD)', bill.total]];
+  return `<section><h2>${e(bill.id)}</h2><p>扣款日期 ${e(bill.chargedOn || '—')} · ${chargedBillStatus}</p>
+    ${bill.originalId ? `<p>原账单 ${e(bill.originalId)}</p>` : ''}</section>
+    <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${e(name)}</th><td>${money(value)}</td></tr>`).join('')}</tbody></table></section>
+    ${bill.reason ? `<section><h2>补收说明</h2><p class="muted">${e(bill.reason)}</p></section>` : ''}`;
 }
 
-const documentBodies = { bol, label, invoice };
+function pod(order) {
+  return `${stop(order, 'destination', '送货 · Consignee', false)}
+    <section><h2>回单记录</h2><p>回传日期 ${e(order.podReceived)}</p></section>`;
+}
 
-export function orderDocument(order, kind) {
-  if (!order || !Object.hasOwn(documentBodies, kind)) return null;
+const documentBodies = { bol, label, pod };
+
+export function orderDocument(order, kind, billId) {
+  if (!order || !Object.hasOwn(orderDocuments, kind) || (kind === 'pod' && !order.podReceived)) return null;
+  const billing = kind === 'invoice' || kind === 'rebill';
+  const bill = billing && billingRecords([order]).find(record => kind === 'invoice' ? !record.originalId : record.originalId && record.id === billId);
+  if (billing && !bill) return null;
   const [name, description] = orderDocuments[kind];
   const title = `${name} · ${description}`;
   const carrier = carrierProfiles[order.rate.carrierId]?.name ?? '承运商未记录';
   return {
-    name: `${kind === 'invoice' ? invoiceId(order) : `${name}-${order.id}`}.html`,
+    name: `${bill ? bill.id : `${name}-${order.id}`}.html`,
     html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · ${e(order.id)}</title>
     <style>
       @page { size: ${kind === 'label' ? '4in 6in' : 'letter'}; margin: ${kind === 'label' ? '.2in' : '14mm'}; }
@@ -77,6 +87,6 @@ export function orderDocument(order, kind) {
       @media print { body { margin: 0; padding: 0; max-width: none; } button { display: none; } .stops { grid-template-columns: repeat(2, minmax(0,1fr)); } }
     </style></head><body><button type="button" onclick="window.print()">打印 / 存为 PDF</button>
     <header><p class="demo">HYE OMS · 演示文件</p><h1>${title}</h1><p>${e(order.id)} · ${e(carrier)}</p></header>
-    ${documentBodies[kind](order)}</body></html>`
+    ${bill ? billDocument(bill) : documentBodies[kind](order)}</body></html>`
   };
 }

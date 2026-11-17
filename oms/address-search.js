@@ -1,4 +1,4 @@
-import { addressValue, postalCode } from './model.js?v=zip-suggestions';
+import { addressValue, postalCode } from './model.js?v=rebill-files';
 
 const endpoint = 'https://photon.komoot.io/api/';
 const resultLimit = 6;
