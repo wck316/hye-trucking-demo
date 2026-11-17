@@ -6,7 +6,7 @@ import {
   quoteModes, shipmentMode, quoteEntry, equipmentTypes, equipmentSummary, addressContactFields, ticketStatuses, ticketCategories, billHref,
   caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons,
   canClaimOrder, canRequestOrderChange, editableOrderStops, orderStopValues, orderChangeLabels, orderStopLabel
-} from './model.js?v=rebill-files';
+} from './model.js?v=hye-freight';
 
 export const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -1348,7 +1348,7 @@ function evidenceField() {
 export function ticketDetail(ticket, order, emptyMessage, kind, bill) {
   const title = (kind === 'tickets' ? '工单' : caseTypes[kind].label) + '详情';
   if (!ticket) return managementDetail(title, `<p class="empty">${emptyMessage}</p>`);
-  const names = { customer: '你', support: 'HYE 客服', system: '系统' };
+  const names = { customer: '你', support: 'HYE Freight 客服', system: '系统' };
   const rows = [
     ...(bill ? [['关联账单', `<a class="link" href="${e(billHref(bill))}">${e(bill.id)}</a>`], ['争议费用项', e(ticket.charge === 'all' ? '整张账单' : ticket.charge)]] : []),
     ...(bill?.originalId ? [['原账单', `<a class="link" href="#billing/${e(bill.orderId)}">${e(bill.originalId)}</a>`]] : []),

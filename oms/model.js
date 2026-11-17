@@ -416,6 +416,7 @@ export function billingRecords(orders) {
 export const billHref = bill => bill.originalId ? `#billing/rebills/${bill.id}` : `#billing/${bill.orderId}`;
 const idFor = prefix => prefix + Array.from(crypto.getRandomValues(new Uint8Array(5)), byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
 const storageKey = 'hye-oms-client-demo-v1';
+const demoCompany = 'HYE Freight 演示客户';
 const demoProNumbers = new Map([
   ['HYE-DEMO-101', 'DEMO-0101'],
   ['HYE-DEMO-102', 'DEMO-0102'],
@@ -489,7 +490,7 @@ function seed() {
   continuing.acceptedRate = selectedRate(continuing);
   return {
     profile: {
-      company: '环洋卡派演示客户', contact: '演示客户', email: 'shipping@example.com',
+      company: demoCompany, contact: '演示客户', email: 'shipping@example.com',
       phone: '+1 213 555 0100', billingEmail: 'billing@example.com', units: 'imperial'
     },
     addresses: demoAddresses,
@@ -505,7 +506,9 @@ export function currentState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
     if (saved?.profile && Array.isArray(saved.orders) && Array.isArray(saved.quotes) && Array.isArray(saved.addresses)) {
-      memory = { ...saved, orders: saved.orders.map(withDemoProNumber), tickets: Array.isArray(saved.tickets) ? saved.tickets : seedTickets(saved.orders) };
+      const profile = saved.profile.company === '环洋卡派演示客户' && saved.profile.email === 'shipping@example.com'
+        ? { ...saved.profile, company: demoCompany } : saved.profile;
+      memory = { ...saved, profile, orders: saved.orders.map(withDemoProNumber), tickets: Array.isArray(saved.tickets) ? saved.tickets : seedTickets(saved.orders) };
     }
   } catch {
     // The current session stays usable if the browser denies local storage.

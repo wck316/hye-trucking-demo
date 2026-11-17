@@ -1,8 +1,8 @@
 import {
   chargedBillStatus, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
   packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=rebill-files';
-import { e } from './views.js?v=management-table-content';
+} from './model.js?v=hye-freight';
+import { e } from './views.js?v=hye-freight';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
@@ -86,7 +86,7 @@ export function orderDocument(order, kind, billId) {
       @media (max-width: 480px) { .stops { grid-template-columns: 1fr; gap: 0; } }
       @media print { body { margin: 0; padding: 0; max-width: none; } button { display: none; } .stops { grid-template-columns: repeat(2, minmax(0,1fr)); } }
     </style></head><body><button type="button" onclick="window.print()">打印 / 存为 PDF</button>
-    <header><p class="demo">HYE OMS · 演示文件</p><h1>${title}</h1><p>${e(order.id)} · ${e(carrier)}</p></header>
+    <header><p class="demo">HYE Freight · 演示文件</p><h1>${title}</h1><p>${e(order.id)} · ${e(carrier)}</p></header>
     ${bill ? billDocument(bill) : documentBodies[kind](order)}</body></html>`
   };
 }

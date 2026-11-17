@@ -1,4 +1,4 @@
-import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=rebill-files';
+import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=hye-freight';
 
 const sides = ['origin', 'destination'];
 const number = '(\\d+(?:[,.]\\d+)*)';

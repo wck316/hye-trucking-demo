@@ -6,19 +6,19 @@ import {
   shipmentMode, quoteEntry, quoteModes, orderTypes, orderType, orderRoute, orderRecordHref, saveCustomRequest, addressContactFields, createDemoApiKey, revokeDemoApiKey,
   createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase,
   canClaimOrder, canRequestOrderChange, editableOrderStops, planOrderChange, planOrderCargoChange, planOrderCancellation, submitOrderChange
-} from './model.js?v=rebill-files';
+} from './model.js?v=hye-freight';
 import {
   quoteView, ratesView, ordersView, billingView, accountView, dashboardView, campaignDetails, orderRows, billRows, billDetail,
   addressRows, addressForm, icon, e, detailsView, quoteSummary, confirmationView, carrierQuotes, workflowHeader,
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
   apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
   orderChangeEditor, orderChangeReview, orderCancellationForm
-} from './views.js?v=management-table-content';
+} from './views.js?v=hye-freight';
 import { renderRouteMap } from './route-map.js?v=zip-suggestions';
-import { orderDocument } from './order-documents.js?v=management-table-content';
-import { bindAddressSuggestions } from './address-search.js?v=rebill-files';
-import { createSatelliteDrawer } from './satellite-preview.js?v=rebill-files';
-import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=rebill-files';
+import { orderDocument } from './order-documents.js?v=hye-freight';
+import { bindAddressSuggestions } from './address-search.js?v=hye-freight';
+import { createSatelliteDrawer } from './satellite-preview.js?v=hye-freight';
+import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=hye-freight';
 import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
 
 const workspace = document.querySelector('#workspace');
