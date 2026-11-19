@@ -2,7 +2,7 @@ import {
   chargedBillStatus, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
   packaging, selectedServices, stopSupplement, totals
 } from './model.js?v=hye-freight';
-import { e } from './views.js?v=hye-freight';
+import { e } from './views.js?v=work-hours';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};

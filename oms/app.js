@@ -13,13 +13,14 @@ import {
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
   apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
   orderChangeEditor, orderChangeReview, orderCancellationForm
-} from './views.js?v=hye-freight';
+} from './views.js?v=work-hours';
 import { renderRouteMap } from './route-map.js?v=zip-suggestions';
-import { orderDocument } from './order-documents.js?v=hye-freight';
+import { orderDocument } from './order-documents.js?v=work-hours';
 import { bindAddressSuggestions } from './address-search.js?v=hye-freight';
 import { createSatelliteDrawer } from './satellite-preview.js?v=hye-freight';
 import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=hye-freight';
 import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
+import { initializePhoneInputs, setPhoneInputValue, phoneInputValue } from './phone-input.js?v=phone-input';
 
 const workspace = document.querySelector('#workspace');
 const workspaceScrolls = () => getComputedStyle(workspace).overflowY === 'auto';
@@ -278,6 +279,18 @@ function updateListRows(rows) {
   workspace.querySelector('.management-list .table-wrap').scrollTop = 0;
 }
 
+function revealSelectedRow(tableWrap) {
+  const row = tableWrap.querySelector('.table-row-selected');
+  if (!row) return;
+  const viewport = tableWrap.getBoundingClientRect();
+  const headerBottom = tableWrap.querySelector('th').getBoundingClientRect().bottom;
+  const rowBounds = row.getBoundingClientRect();
+  if (rowBounds.top < headerBottom) tableWrap.scrollTop += rowBounds.top - headerBottom;
+  else if (rowBounds.bottom > viewport.top + tableWrap.clientHeight) {
+    tableWrap.scrollTop += rowBounds.bottom - viewport.top - tableWrap.clientHeight;
+  }
+}
+
 function openTicket(ticket) {
   const route = caseHref(ticket);
   if (location.hash === route) render(true);
@@ -387,6 +400,7 @@ function render(moveFocus = false, message = '') {
     account: () => accountView(state.profile, state.addresses, state.apiKeys ?? [], activeAccountTab)
   };
   workspace.innerHTML = screens[section]();
+  initializePhoneInputs(workspace);
   workspace.querySelectorAll('[data-quick-address]').forEach(input => bindAddressSuggestions(input, state.addresses));
   const routeMap = workspace.querySelector('[data-route-map]');
   if (routeMap) renderRouteMap(routeMap);
@@ -402,8 +416,13 @@ function render(moveFocus = false, message = '') {
     const nextList = workspace.querySelector('.management-tools')?.dataset.filters;
     const sameList = detail && previousList && previousList === nextList;
     workspace.scrollTop = sameList ? previousScroll : 0;
-    if (sameList) workspace.querySelector('.management-list .table-wrap').scrollTop = previousListScroll;
+    if (detail) {
+      const tableWrap = workspace.querySelector('.management-list .table-wrap');
+      if (sameList) tableWrap.scrollTop = previousListScroll;
+      revealSelectedRow(tableWrap);
+    }
   }
+  return detail?.closest('.management-workspace');
 }
 
 function hideServiceHelp() {
@@ -450,7 +469,10 @@ function readCargo(form, previousItems, displayUnits = units, legacyDescription 
     };
     const commodities = Array.from(row.querySelectorAll('[data-commodity]'), entry => {
       const value = name => entry.querySelector('[name="' + name + '"]').value.trim();
-      const hazmat = Object.fromEntries(Array.from(entry.querySelectorAll('[data-hazmat] [name]'), input => [input.name, input.value.trim()]));
+      const hazmat = Object.fromEntries(Array.from(entry.querySelectorAll('[data-hazmat] [name]'), input => {
+        const value = input.matches('[data-phone-number]') ? phoneInputValue(input) : input.value.trim();
+        return [input.name, value];
+      }));
       return {
         description: value('commodity'), declaredValue: value('declaredValue'), nmfc: value('nmfc'), freightClass: value('freightClass'),
         regulated: Array.from(entry.querySelectorAll('[name="regulated"]:checked'), input => input.value),
@@ -524,6 +546,7 @@ function showDialog(title, content, mode = '') {
   dialog.dataset.mode = mode;
   dialog.classList.toggle('wide-dialog', Boolean(mode));
   dialog.innerHTML = `<header class="panel-head ruled"><h2 id="dialog-title" class="panel-title" tabindex="-1">${title}</h2><button class="icon-button" type="button" data-action="close-dialog" aria-label="关闭弹窗">${icon('close')}</button></header><div class="detail-body">${content}</div>`;
+  initializePhoneInputs(dialog);
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;
   dialog.querySelector('#dialog-title').focus();
@@ -618,6 +641,7 @@ function editCargo(editItems, nextUnits) {
     editItems?.(cargo.items);
     cargo.units = nextUnits ?? cargo.units;
     changeForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ ...order, shipment: { ...order.shipment, items: cargo.items } }, cargo.units);
+    initializePhoneInputs(changeForm);
     return cargo.items;
   }
   const customForm = workspace.querySelector('#custom-quote-form');
@@ -627,6 +651,7 @@ function editCargo(editItems, nextUnits) {
     editItems?.(shipment.items);
     customDraft.units = nextUnits ?? customDraft.units;
     customForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ shipment }, customDraft.units);
+    initializePhoneInputs(customForm);
     return shipment.items;
   }
   const form = workspace.querySelector('#details-form');
@@ -635,6 +660,7 @@ function editCargo(editItems, nextUnits) {
     if (!quote) return [];
     units = nextUnits ?? units;
     form.querySelector('#cargo-editor').outerHTML = cargoEditor(quote, units);
+    initializePhoneInputs(form);
     updateSummary(quote);
     return quote.shipment.items;
   }
@@ -777,13 +803,13 @@ const actions = {
     const values = {
       originCompany: 'West Coast Demo Warehouse', originContact: '演示提货联系人', originEmail: 'pickup@example.com', originPhone: '+1 213 555 0101',
       destinationCompany: 'Midwest Demo Receiving', destinationContact: '演示送货联系人', destinationEmail: 'delivery@example.com', destinationPhone: '+1 312 555 0102',
-      originReference: 'PU-DEMO-001', originNotes: '从西侧入口进入，抵达后联系仓库。', originOpensAt: '08:00', originClosesAt: '18:00',
+      originReference: 'PU-DEMO-001', originNotes: '从西侧入口进入，抵达后联系仓库。', originOpensAt: '09:00', originClosesAt: '17:00',
       destinationReference: 'DEL-DEMO-001', destinationNotes: '请到收货窗口登记。', destinationOpensAt: '09:00', destinationClosesAt: '17:00',
       pickupEnd: '17:00', commodity: '纸箱包装日用品'
     };
     for (const [name, value] of Object.entries(values)) {
       const field = form.querySelector('[name="' + name + '"]');
-      if (!field.value) field.value = value;
+      if (!field.value) setPhoneInputValue(field, value);
     }
     const quote = saveDetails(form);
     if (quote) updateSummary(quote);
@@ -861,7 +887,7 @@ const actions = {
     if (!quick) {
       for (const [key, field] of Object.entries(addressContactFields)) {
         const control = input.form.elements[side + field];
-        if (address[key] && control) control.value = address[key];
+        if (address[key] && control) setPhoneInputValue(control, address[key]);
       }
       const quote = saveDetails();
       if (quote) updateSummary(quote);
@@ -1357,7 +1383,9 @@ window.addEventListener('hashchange', () => {
   }
   const customForm = workspace.querySelector('#custom-quote-form');
   if (customForm && !customForm.dataset.submitted) customDraft = readCustomDraft(customForm);
-  render(true);
+  render(true)?.querySelectorAll('.management-detail-scroll, .table-row-selected').forEach(element => {
+    element.classList.add('record-arrival');
+  });
 });
 
 render();

@@ -7,6 +7,7 @@ import {
   caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons,
   canClaimOrder, canRequestOrderChange, editableOrderStops, orderStopValues, orderChangeLabels, orderStopLabel
 } from './model.js?v=hye-freight';
+import { callingCodes, parsePhone } from './phone-input.js?v=phone-input';
 
 export const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -56,7 +57,27 @@ function option(value, label, current) {
   return `<option value="${e(value)}"${value === current ? ' selected' : ''}>${e(label)}</option>`;
 }
 function field({ label, name, value = '', type = 'text', attributes = '', required = false, placeholder = '', className = '' }) {
+  if (type === 'tel' && !/Extension$/i.test(name)) return phoneField({ label, name, value, required, className });
+  if (/Extension$/i.test(name)) {
+    type = 'text';
+    attributes = 'maxlength="12" inputmode="numeric" pattern="[0-9]*" autocomplete="tel-extension"';
+    placeholder = '选填';
+  }
   return `<label class="field ${className}"><span>${label}${required ? ' ' + requiredMark : ''}</span><input name="${name}" type="${type}" value="${e(value)}"${placeholder ? ' placeholder="' + e(placeholder) + '"' : ''}${required ? ' required' : ''} ${attributes}></label>`;
+}
+let phoneFieldSequence = 0;
+function phoneField({ label, name, value, required, className }) {
+  const id = `phone-field-${++phoneFieldSequence}`;
+  const { country } = parsePhone(value);
+  const codes = callingCodes.some(([code]) => code === country) ? callingCodes : [...callingCodes, [country, '其他地区']];
+  return `<div class="field phone-field ${className}" data-phone-field>
+    <label for="${id}">${label}${required ? ' ' + requiredMark : ''}</label>
+    <div class="phone-input-group">
+      <select data-phone-country autocomplete="tel-country-code" aria-label="${e(label)}国家区号">${codes.map(([code, countryName]) => option(code, code ? `+${code} ${countryName}` : '国际号码', country)).join('')}</select>
+      <input id="${id}" name="${name}" type="tel" value="${e(value)}" data-phone-number inputmode="tel" autocomplete="tel-national" maxlength="60" aria-describedby="${id}-error"${required ? ' required' : ''}>
+    </div>
+    <small class="phone-error" id="${id}-error" data-phone-error aria-live="polite" hidden></small>
+  </div>`;
 }
 function selectField(label, name, values, current, required = false) {
   return `<label class="field"><span>${label}${required ? ' ' + requiredMark : ''}</span><select name="${name}"${required ? ' required' : ''}>${Object.entries(values).map(([id, value]) => option(id, value, current)).join('')}</select></label>`;
@@ -69,8 +90,8 @@ function pickupTimeFields(shipment, details) {
     <legend>提货窗口（当地）</legend>
     <div class="stop-time-grid pickup-window">
       ${pickupDateField(shipment)}
-      ${field({ label: '最早提货', name: 'pickupTime', value: shipment.pickupTime, type: 'time', required: true })}
-      ${field({ label: '最晚提货', name: 'pickupEnd', value: details.pickupEnd, type: 'time', required: true })}
+      ${field({ label: '最早提货', name: 'pickupTime', value: shipment.pickupTime ?? '09:00', type: 'time', required: true })}
+      ${field({ label: '最晚提货', name: 'pickupEnd', value: details.pickupEnd ?? '17:00', type: 'time', required: true })}
     </div>
   </fieldset>`;
 }
@@ -96,7 +117,8 @@ function serviceFields(shipment, side, label, collapsible = false) {
   </details>`;
 }
 function stopHoursFields(details, side) {
-  const { opensAt, closesAt } = stopSupplement(details, side);
+  const opensAt = details[side + 'OpensAt'] ?? '09:00';
+  const closesAt = details[side + 'ClosesAt'] ?? '17:00';
   return `<fieldset class="stop-time-group">
     <legend>营业时间（当地）</legend>
     <div class="stop-time-grid">
@@ -120,7 +142,7 @@ function stopContactFields(details, side) {
     ${field({ label: '现场联系邮箱', name: side + 'Email', value: details[side + 'Email'], type: 'email', required: true, attributes: 'maxlength="100"', className: 'contact-email' })}
     <div class="contact-phone">
       ${field({ label: '联系电话', name: side + 'Phone', value: details[side + 'Phone'], type: 'tel', required: true, attributes: 'maxlength="40"' })}
-      ${field({ label: '分机号（可选）', name: side + 'PhoneExtension', value: details[side + 'PhoneExtension'], type: 'tel', attributes: 'maxlength="12"', placeholder: '例如 123' })}
+      ${field({ label: '分机号', name: side + 'PhoneExtension', value: details[side + 'PhoneExtension'], type: 'tel' })}
     </div>
   </div>`;
 }
@@ -1058,8 +1080,10 @@ export function orderChangeEditor(order, initialSide, drafts, cargoDraft) {
         <div class="order-change-fields">
           ${editField('Company', 'maxlength="100"')}
           ${editField('Contact', 'maxlength="70"')}
-          ${editField('Phone', 'maxlength="40"', 'tel')}
-          ${editField('PhoneExtension', 'maxlength="15" inputmode="numeric"')}
+          <div class="contact-phone">
+            ${editField('Phone', '', 'tel')}
+            ${editField('PhoneExtension', '')}
+          </div>
           ${editField('Email', 'maxlength="100"', 'email')}
           ${editField('Reference', 'maxlength="60"')}
         </div>
@@ -1257,7 +1281,7 @@ function managementTabs(label, tabs, active, summary = '') {
 }
 function managementDetail(title, body, id, actions = '', tabs = '') {
   return `<div class="management-detail-head">
-    <header class="panel-head"><div><h2 class="panel-title" id="detail-title" tabindex="-1">${title}</h2>${id ? `<p class="note">${e(id)}</p>` : ''}</div>
+    <header class="panel-head"><div><h2 class="panel-title" id="detail-title" tabindex="-1"${id ? ' aria-describedby="detail-record-id"' : ''}>${title}</h2>${id ? `<p class="note" id="detail-record-id">${e(id)}</p>` : ''}</div>
       ${actions ? `<div class="actions management-detail-actions">${actions}</div>` : ''}</header>${tabs}
   </div><div class="management-detail-scroll"${tabs ? '' : ' tabindex="0" role="region" aria-labelledby="detail-title"'}>${body}</div>`;
 }
@@ -1478,8 +1502,10 @@ export function addressForm(address = {}) {
     <div class="account-fields">
       ${field({ label: '公司名称', name: 'company', value: address.company, attributes: 'maxlength="100"' })}
       ${field({ label: '联系人', name: 'contact', value: address.contact, attributes: 'maxlength="70"' })}
-      ${field({ label: '联系电话', name: 'phone', value: address.phone, type: 'tel', attributes: 'maxlength="40"' })}
-      ${field({ label: '分机号', name: 'phoneExtension', value: address.phoneExtension, type: 'tel', attributes: 'maxlength="12"' })}
+      <div class="contact-phone">
+        ${field({ label: '联系电话', name: 'phone', value: address.phone, type: 'tel' })}
+        ${field({ label: '分机号', name: 'phoneExtension', value: address.phoneExtension, type: 'tel' })}
+      </div>
       ${field({ label: '联系邮箱', name: 'email', value: address.email, type: 'email', attributes: 'maxlength="100"', className: 'full' })}
     </div>
     <div class="actions end account-actions"><button class="btn primary" type="submit">保存地址</button></div>
