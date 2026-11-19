@@ -74,7 +74,7 @@ export function initializePhoneInputs(root) {
     const original = input.value;
     const parsed = synchronize(input);
     Object.assign(input.dataset, {
-      phoneOriginal: extensionInput(input) ? original.replace(extensionPattern, '').trim() : original, phoneCountry: parsed.country,
+      phoneOriginal: extensionInput(input) ? original.replace(extensionPattern, '').trim() : original, phoneInitialCountry: parsed.country,
       phoneDigits: parsed.number.replace(/\D/g, ''), phoneExtension: extensionInput(input) ? '' : parsed.extension,
       phoneReady: 'true'
     });
@@ -97,7 +97,7 @@ export function phoneInputValue(input) {
   const { country, number, extension } = parsePhone(input.value, countryInput.value);
   const digits = number.replace(/\D/g, '');
   const inlineExtension = extensionInput(input) ? '' : extension;
-  const unchanged = input.dataset.phoneCountry === country && input.dataset.phoneDigits === digits && input.dataset.phoneExtension === inlineExtension;
+  const unchanged = input.dataset.phoneInitialCountry === country && input.dataset.phoneDigits === digits && input.dataset.phoneExtension === inlineExtension;
   if (unchanged) return input.dataset.phoneOriginal;
   return digits ? `+${country}${country ? ' ' : ''}${formatNumber(digits, country)}${inlineExtension ? ' ext. ' + inlineExtension : ''}` : '';
 }

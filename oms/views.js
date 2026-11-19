@@ -7,7 +7,7 @@ import {
   caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons,
   canClaimOrder, canRequestOrderChange, editableOrderStops, orderStopValues, orderChangeLabels, orderStopLabel
 } from './model.js?v=hye-freight';
-import { callingCodes, parsePhone } from './phone-input.js?v=phone-input';
+import { callingCodes, parsePhone } from './phone-input.js?v=phone-input-2';
 
 export const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'

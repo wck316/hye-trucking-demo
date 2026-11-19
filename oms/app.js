@@ -13,14 +13,14 @@ import {
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
   apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
   orderChangeEditor, orderChangeReview, orderCancellationForm
-} from './views.js?v=work-hours';
+} from './views.js?v=work-hours-2';
 import { renderRouteMap } from './route-map.js?v=zip-suggestions';
-import { orderDocument } from './order-documents.js?v=work-hours';
+import { orderDocument } from './order-documents.js?v=work-hours-2';
 import { bindAddressSuggestions } from './address-search.js?v=hye-freight';
 import { createSatelliteDrawer } from './satellite-preview.js?v=hye-freight';
 import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=hye-freight';
 import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
-import { initializePhoneInputs, setPhoneInputValue, phoneInputValue } from './phone-input.js?v=phone-input';
+import { initializePhoneInputs, setPhoneInputValue, phoneInputValue } from './phone-input.js?v=phone-input-2';
 
 const workspace = document.querySelector('#workspace');
 const workspaceScrolls = () => getComputedStyle(workspace).overflowY === 'auto';
