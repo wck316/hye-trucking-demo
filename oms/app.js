@@ -14,13 +14,13 @@ import {
   cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView, customRecordsView, customInquiryNavigation, customRequestSnapshot, customChangeComparison,
   apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
   orderChangeEditor, orderChangeReview, orderCancellationForm, customRouteSummary, customStopLabel, customStopCargo
-} from './views.js?v=account-layout';
+} from './views.js?v=dashboard-offers';
 import { customRequestChanges } from './custom-changes.js?v=account-layout';
 import { renderRouteMap } from './route-map.js?v=zip-suggestions';
 import { orderDocument } from './order-documents.js?v=account-layout';
 import { bindAddressSuggestions } from './address-search.js?v=account-layout';
 import { createSatelliteDrawer } from './satellite-preview.js?v=account-layout';
-import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=account-layout';
+import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=dashboard-quote';
 import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
 import { initializePhoneInputs, setPhoneInputValue, phoneInputValue } from './phone-input.js?v=phone-input-2';
 
@@ -46,10 +46,11 @@ const detailFields = [...stopSides.flatMap(side => stopFields.map(field => side 
 
 let draft = emptyShipment();
 let draftId = '';
+let draftKey = '';
 let assistantDetails = {};
 const quickDrafts = new Map();
-const quickDraftKey = (mode, id) => id || mode;
 const assistantDescriptions = new Map();
+const dashboardAssistant = { mode: 'ltl', description: '' };
 let units = currentState().profile.units;
 const emptyCustomDraft = () => ({ shipment: { ...emptyShipment(), pickupDate: '', deliveryDate: '' }, details: {}, fields: {}, units: currentState().profile.units });
 let customDraft = emptyCustomDraft();
@@ -453,11 +454,15 @@ function render(moveFocus = false, message = '') {
   if (section === 'ftl') section = 'quote';
   if (!Object.hasOwn(labels, section) || (['rates', 'details'].includes(section) && !quote)) section = 'quote';
   if (section === 'details' && (!quote.selectedRateId || booked)) section = 'rates';
-  if (section === 'quote' && (!workspace.querySelector('#quote-form') || draftId !== (quote?.id ?? '') || shipmentMode(draft) !== mode)) {
-    const saved = quickDrafts.get(quickDraftKey(mode, quote?.id));
-    draft = structuredClone(saved?.shipment ?? quote?.shipment ?? emptyShipment(mode));
-    assistantDetails = saved?.details ?? {};
-    draftId = quote?.id ?? '';
+  if (section === 'quote') {
+    const key = id === 'ai' ? mode + '/ai' : quote?.id ?? mode;
+    if (!workspace.querySelector('#quote-form') || draftKey !== key) {
+      const saved = quickDrafts.get(key);
+      draft = structuredClone(saved?.shipment ?? quote?.shipment ?? emptyShipment(mode));
+      assistantDetails = saved?.details ?? {};
+      draftId = quote?.id ?? '';
+      draftKey = key;
+    }
   }
   const navigationSection = ['quote', 'rates', 'details'].includes(section) ? quoteEntry({ mode }) : section;
   const header = workflowHeader(section, quote, booked, mode);
@@ -475,7 +480,7 @@ function render(moveFocus = false, message = '') {
   renderSidebar(state, navigationSection);
 
   const screens = {
-    dashboard: () => dashboardView(state),
+    dashboard: () => dashboardView(state, dashboardAssistant),
     quote: () => quoteView(draft, units, Object.values(assistantDetails).some(Boolean)),
     rates: () => ratesView(quote, booked, message, units, rateFiltersByQuote.get(quote.id) ?? {}),
     details: () => detailsView(quote, state.addresses, units),
@@ -716,8 +721,7 @@ function readShipment() {
   return { ...draft, ...readStops(fields), ...ftl, pickupDate: fields.get('pickupDate'), items };
 }
 
-function analyzeAssistant(form) {
-  const shipment = readShipment();
+function analyzeAssistant(form, shipment = readShipment()) {
   const result = analyzeQuoteText(form.elements.description.value, { mode: shipmentMode(shipment), addresses: currentState().addresses });
   return { result, shipment: applyQuoteText(shipment, result) };
 }
@@ -1014,6 +1018,33 @@ const actions = {
     target?.focus({ preventScroll: true });
     target.closest('[data-custom-stop]').scrollIntoView({ block: 'nearest' });
     if (affectedCargo) notify('地点已移除，请为关联货物重新选择' + (side === 'origin' ? '提货点' : '送货点'));
+  },
+  'dashboard-quote-example'(_, button) {
+    const form = button.form;
+    const cargo = form.elements.mode.value === 'ftl'
+      ? '用 1 辆 53ft 干柜车，20 个托盘'
+      : '2 个托盘';
+    const input = form.elements.description;
+    input.value = '明天从 90001（商业地址有卸货平台）送到 60601（商业地址无卸货平台）。\n'
+      + cargo + '，每托盘 400 lb，48 × 40 × 48 in。';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  },
+  'dashboard-quote'({ next }, button) {
+    const form = workspace.querySelector('#dashboard-quote-form');
+    if (!form || form.dataset.submitted) return;
+    const mode = form.elements.mode.value;
+    const { result, shipment } = analyzeAssistant(form, emptyShipment(mode));
+    units = currentState().profile.units;
+    form.dataset.submitted = 'true';
+    button.disabled = true;
+    if (next === 'rates' && pricingReady(shipment)) {
+      const quote = saveQuote(shipment, '', result.details);
+      navigate('rates/' + quote.id);
+      return;
+    }
+    quickDrafts.set(mode + '/ai', { shipment, details: result.details });
+    navigate(quoteEntry(shipment) + '/ai');
   },
   'open-assistant'() {
     const description = assistantDescriptions.get(location.hash) ?? '';
@@ -1396,7 +1427,7 @@ function saveShipment() {
   }
   const quote = saveQuote(draft, draftId, assistantDetails);
   assistantDetails = {};
-  quickDrafts.delete(quickDraftKey(shipmentMode(draft), draftId));
+  quickDrafts.delete(draftKey);
   workspace.querySelector('#quote-form').dataset.submitted = 'true';
   draftId = quote.id;
   navigate('rates/' + quote.id);
@@ -1412,6 +1443,13 @@ const submits = {
       return;
     }
     sendOrderChange(form.dataset.order, planOrderCancellation(order, form.elements.reason.value));
+  },
+  'dashboard-quote-form'(form) {
+    const { result, shipment } = analyzeAssistant(form, emptyShipment(form.elements.mode.value));
+    const panel = workspace.querySelector('#dashboard-quote-result');
+    panel.innerHTML = quoteAssistantResult(result, shipment, currentState().profile.units, true);
+    panel.hidden = false;
+    panel.scrollIntoView({ block: 'nearest' });
   },
   'quote-assistant-form'(form) {
     const { result, shipment } = analyzeAssistant(form);
@@ -1671,6 +1709,11 @@ dialog.addEventListener('input', event => {
 });
 
 workspace.addEventListener('input', event => {
+  if (event.target.form?.id === 'dashboard-quote-form') {
+    dashboardAssistant[event.target.name] = event.target.value;
+    workspace.querySelector('#dashboard-quote-result').hidden = true;
+    return;
+  }
   const filterGroup = event.target.closest('[data-filters]');
   if (filterGroup) {
     const kind = filterGroup.dataset.filters;
@@ -1736,7 +1779,7 @@ window.addEventListener('hashchange', () => {
   const quickForm = workspace.querySelector('#quote-form');
   draft = readShipment();
   if (quickForm && !quickForm.dataset.submitted) {
-    quickDrafts.set(quickDraftKey(shipmentMode(draft), draftId), { shipment: draft, details: assistantDetails });
+    quickDrafts.set(draftKey, { shipment: draft, details: assistantDetails });
   }
   const customForm = workspace.querySelector('#custom-quote-form');
   if (customForm && !customForm.dataset.submitted) {

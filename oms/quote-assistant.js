@@ -88,7 +88,8 @@ function pickupDate(text, today) {
 
 function splitStops(text) {
   const paired = text.match(/(?:从\s*|\bfrom\s+)([^\n；;]+?)\s*(?:送到|运到|运往|送往|发往|到|至|\bto\b|→|->)\s*([^\n；;]+)/i)
-    ?? text.match(/([^\n；;]+?)\s*(?:→|->)\s*([^\n；;]+)/);
+    ?? text.match(/([^\n；;]+?)\s*(?:→|->)\s*([^\n；;]+)/)
+    ?? text.match(/\b(\d{5}(?:-\d{4})?\b(?:\s*\([^)\n]+\))?)\s*(?:送到|运到|运往|送往|发往|到|至|\bto\b)\s*(\d{5}(?:-\d{4})?\b(?:\s*\([^)\n]+\))?)/i);
   const stops = paired ? { origin: paired[1], destination: paired[2] } : {};
   for (const line of text.split(/[\n；;。]/)) {
     const markers = [...line.matchAll(stopMarker)];

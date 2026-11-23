@@ -2,7 +2,7 @@ import {
   serviceOptions, selectedServices, addressTypes, addressTypeFor, zones, unitSettings, packaging, orderStatuses, orderTypes, orderType, orderRoute, orderRecordHref, rebillStatuses, rebillCollectionRule, billStatusText, billAmountLabel, rebillCountdownText, rebillMethodText, walletKinds,
   dateInZone, totals, displayAddress, shortAddress, addressValue, invoiceId, billingRecords, money, displayMeasurement,
   carrierProfiles, selectedRate, quoteStatus, postalCode, stopDetailsReady, itemCommodities, itemFreightClasses,
-  hazardClasses, packingGroups, hazardIdPattern, stopSupplement, cargoReady, estimatedLinearFeet, orderDocuments,
+  hazardClasses, packingGroups, hazardIdPattern, stopSupplement, cargoReady, pricingReady, estimatedLinearFeet, orderDocuments,
   quoteModes, shipmentMode, quoteEntry, equipmentTypes, equipmentSummary, addressContactFields, ticketStatuses, ticketCategories, billHref,
   caseTypes, caseKind, caseRoute, caseHref, caseCategory, disputeReasons, claimReasons,
   canClaimOrder, canRequestOrderChange, editableOrderStops, orderStopValues, orderChangeLabels, orderStopLabel, customShipmentStops, customCargoRoute, customRequestStatuses, customRequestStatus, customChangeTicket
@@ -291,7 +291,7 @@ export function quoteAssistantForm(mode, description) {
     <div id="quote-assistant-result" class="assistant-result" aria-live="polite" hidden></div>`;
 }
 
-export function quoteAssistantResult(result, shipment, units) {
+export function quoteAssistantResult(result, shipment, units, onDashboard = false) {
   const { weight, length, weightFactor, lengthFactor } = unitSettings[units];
   const labels = { origin: '提货地址', destination: '送货地址', pickupDate: '提货日期', equipment: '车型', vehicleCount: '车辆数量' };
   const rows = Object.entries(result.fields).map(([name, value]) => [labels[name], e(name === 'equipment' ? equipmentTypes[value] : value)]);
@@ -318,11 +318,19 @@ export function quoteAssistantResult(result, shipment, units) {
   }
   const unassigned = result.unassigned ? '<p class="note">有交接资料尚未注明提货或送货，请补上对应地点后再识别。</p>' : '';
   if (!rows.length && !details.length) return unassigned || '<p class="note">暂未识别到可填写的信息。可补充地址或 ZIP、日期、重量和尺寸。</p>';
+  if (onDashboard && shipmentMode(shipment) === 'ftl' && !result.fields.vehicleCount) {
+    rows.push(['车辆数量', e(shipment.vehicleCount) + '（默认）']);
+  }
+  const ready = onDashboard && pricingReady(shipment);
+  const actions = onDashboard
+    ? `${ready ? '<button type="button" class="btn small" data-action="dashboard-quote" data-next="form">带入查价表单</button>' : ''}
+      <button type="button" class="btn primary small" data-action="dashboard-quote" data-next="${ready ? 'rates' : 'form'}">${ready ? '查看演示报价' : '补全查价信息'} ${icon('arrow')}</button>`
+    : `<button type="button" class="btn primary small" data-action="assistant-apply">${rows.length ? '应用到查价表单' : '应用交接资料'}</button>`;
   return `<h3 class="subhead">核对识别结果</h3>${rows.length ? detailList(rows) : ''}
     ${details.length ? `<h4 class="subhead">完善订单时带入</h4>${detailList(details)}` : ''}
     ${unassigned}
     ${missing.length ? `<p class="note">还需确认或补填：${missing.join('、')}</p>` : ''}
-    <div class="actions end"><button type="button" class="btn primary small" data-action="assistant-apply">${rows.length ? '应用到查价表单' : '应用交接资料'}</button></div>`;
+    <div class="actions end">${actions}</div>`;
 }
 
 function customStopFields(stop, side, index, count, fullShipment, units) {
@@ -1031,63 +1039,107 @@ export function campaignDetails(id) {
   </div>` };
 }
 
-export function dashboardView({ orders, quotes, tickets }) {
+function dashboardAssistant({ mode, description }) {
+  return `<section class="dashboard-assistant" aria-labelledby="dashboard-assistant-title">
+    <header class="dashboard-assistant-head">
+      <span class="dashboard-assistant-icon">${icon('sparkles')}</span>
+      <div><h2 id="dashboard-assistant-title">AI 快速查价</h2><p>描述运输需求，自动填入路线和货物信息。</p></div>
+    </header>
+    <form id="dashboard-quote-form">
+      <fieldset class="dashboard-mode">
+        <legend class="sr-only">运输方式</legend>
+        ${Object.entries(quoteModes).map(([value, label]) => `<label><input class="sr-only" type="radio" name="mode" value="${value}"${value === mode ? ' checked' : ''}><span>${label}</span></label>`).join('')}
+      </fieldset>
+      <label class="sr-only" for="dashboard-quote-description">运输需求描述</label>
+      <textarea id="dashboard-quote-description" name="description" rows="3" maxlength="2500" required placeholder="输入提送货 ZIP、提货日期、地址类型、货物件数、重量和尺寸">${e(description)}</textarea>
+      <div class="dashboard-assistant-actions">
+        <button type="button" class="link" data-action="dashboard-quote-example">${icon('book')} 填入示例</button>
+        <button type="submit" class="btn primary">识别运输需求 ${icon('arrow')}</button>
+      </div>
+    </form>
+    <div id="dashboard-quote-result" class="assistant-result" aria-live="polite" hidden></div>
+  </section>`;
+}
+
+function dashboardShortcuts() {
+  const shortcuts = [
+    ['quote', 'order', 'LTL 零担', '按托盘或件数询价'],
+    ['ftl', 'truck', 'FTL 整车', '按车型和线路询价'],
+    ['custom', 'book', '定制询价', '多点提送货及特殊需求']
+  ];
+  return `<section class="dashboard-section dashboard-shortcuts" aria-labelledby="dashboard-shortcuts">
+    <h2 class="subhead" id="dashboard-shortcuts">手动询价</h2>
+    <ul>${shortcuts.map(([route, symbol, title, description]) => `<li><a href="#${route}">
+      <span class="dashboard-shortcut-icon">${icon(symbol)}</span><span><strong>${title}</strong><small>${description}</small></span>${icon('chev')}
+    </a></li>`).join('')}</ul>
+  </section>`;
+}
+
+function dashboardOffers() {
+  const { 'ltl-first': featured, ...otherOffers } = campaigns;
+  return `<section class="dashboard-offers" aria-label="运输优惠与服务">
+    <button class="dashboard-feature" type="button" data-action="view-campaign" data-id="ltl-first" aria-haspopup="dialog">
+      <img src="../assets/dashboard/western-freight.jpg" width="1280" height="853" alt="">
+      <span class="dashboard-feature-copy">
+        <span class="dashboard-feature-title">${featured.title}</span>
+        <strong>${featured.offer}</strong>
+        <span class="dashboard-feature-action">查看优惠条件 ${icon('arrow')}</span>
+      </span>
+    </button>
+    <ul class="dashboard-campaigns">${Object.entries(otherOffers).map(([id, { title, offer }]) => `<li>
+      <button class="campaign-entry" type="button" data-action="view-campaign" data-id="${id}" aria-haspopup="dialog">
+        <span>${title}<strong>${offer}</strong></span>${icon('chev')}
+      </button>
+    </li>`).join('')}</ul>
+  </section>`;
+}
+
+export function dashboardView({ orders, quotes, tickets }, assistant) {
   const booked = new Set(orders.map(order => order.quoteId));
   const drafts = quotes.filter(quote => quote.stage === 'details' && quote.selectedRateId && !booked.has(quote.id));
   const unselected = quotes.filter(quote => quote.stage === 'compare' && !booked.has(quote.id));
   const openCases = tickets.filter(ticket => ticket.status !== 'closed').sort((a, b) => b.updatedAt - a.updatedAt);
   const tasks = [
-    ['待完善订单', String(drafts.length), drafts.length
-      ? `<a class="link" href="#details/${e(drafts[0].id)}">继续最近一票 ${icon('chev')}</a>` : '<span class="note">暂无待完善订单</span>'],
-    ['待选报价', String(unselected.length), unselected.length
-      ? `<a class="link" href="#rates/${e(unselected[0].id)}">比较最新报价 ${icon('chev')}</a>` : '<span class="note">暂无待选报价</span>'],
-    ['未关闭工单与申诉', String(openCases.length), openCases.length
-      ? `<a class="link" href="${e(caseHref(openCases[0]))}">查看最近一条 ${icon('chev')}</a>` : '<span class="note">暂无未关闭记录</span>']
+    ['order', '待完善订单', drafts.length, drafts.length ? '#details/' + drafts[0].id : '', '继续最近一票'],
+    ['search', '待选报价', unselected.length, unselected.length ? '#rates/' + unselected[0].id : '', '比较最新报价'],
+    ['ticket', '未关闭工单与申诉', openCases.length, openCases.length ? caseHref(openCases[0]) : '', '查看最近一条']
   ];
   const updates = [
     ['订单管理支持按运输类型查看', '在 LTL、FTL 和定制服务之间切换，各标签独立保留筛选。', '#orders', '查看订单'],
     ['线上提交账单申诉与运输索赔', '从账单或运单详情发起，在工单与申诉中跟进。', '#tickets/disputes', '查看申诉']
   ];
-  const { 'ltl-first': featured, ...otherOffers } = campaigns;
   return `<div class="dashboard">
-    <h1 class="sr-only" tabindex="-1">工作台</h1>
-    <section class="dashboard-offers" aria-label="运输优惠与服务">
-      <button class="dashboard-feature" type="button" data-action="view-campaign" data-id="ltl-first" aria-haspopup="dialog">
-        <img src="../assets/dashboard/western-freight.jpg" width="1280" height="853" alt="">
-        <span class="dashboard-feature-copy"><strong>LTL 首单${featured.offer}</strong><span>查看条件 ${icon('arrow')}</span></span>
-      </button>
-      <ul class="dashboard-campaigns">${Object.entries(otherOffers).map(([id, { title, offer }]) => `<li>
-        <button class="link campaign-entry" type="button" data-action="view-campaign" data-id="${id}" aria-haspopup="dialog">
-          <span>${title} · <strong>${offer}</strong></span>${icon('arrow')}
-        </button>
+    ${pageHead('工作台')}
+    <div class="dashboard-columns dashboard-top">
+      ${dashboardAssistant(assistant)}
+      ${dashboardOffers()}
+      ${dashboardShortcuts()}
+    </div>
+    <section aria-labelledby="dashboard-tasks">
+      <h2 class="subhead dashboard-tasks-title" id="dashboard-tasks">待办事项</h2>
+      <ul class="dashboard-tasks">${tasks.map(([symbol, label, value, href, action]) => `<li class="dashboard-task">
+        <span class="dashboard-task-icon">${icon(symbol)}</span>
+        <div><h3>${label}</h3><p class="dashboard-task-value">${value}</p></div>
+        ${href ? `<a class="link" href="${e(href)}">${action} ${icon('chev')}</a>` : ''}
       </li>`).join('')}</ul>
     </section>
     <div class="dashboard-columns">
-      <div class="dashboard-main">
-        <section class="dashboard-section" aria-labelledby="dashboard-tasks">
-          <header class="panel-head"><h2 class="subhead" id="dashboard-tasks">待办事项</h2></header>
-          <div class="dashboard-tasks">${tasks.map(([label, value, links]) => `<div class="dashboard-task">
-            <h3 class="dashboard-task-label">${label}</h3><p class="dashboard-task-value">${e(value)}</p>
-            <div class="dashboard-task-links">${links}</div>
-          </div>`).join('')}</div>
-        </section>
-        <section class="dashboard-section" aria-labelledby="dashboard-orders">
-          <header class="panel-head"><h2 class="subhead" id="dashboard-orders">近期运单</h2><a class="link" href="#orders">订单管理 ${icon('arrow')}</a></header>
-          <div class="dashboard-table">
-            <table aria-labelledby="dashboard-orders"><thead><tr><th scope="col">运单号 / 路线</th><th scope="col">状态</th><th scope="col">预计送达</th></tr></thead>
-            <tbody>${orders.slice(0, 5).map(order => {
-              const kind = orderType(order);
-              const arrival = ['delivered', 'cancelled'].includes(order.status)
-                ? '—'
-                : order.shipment.pickupDate && order.rate?.businessDays?.length ? e(arrivalText(order, order.rate)) : '待确认';
-              return `<tr><td><a class="link" href="${e(orderRecordHref(kind, order))}">${e(order.id)}</a><small>${routeLabel(order.shipment)}</small></td>
-                <td>${status(order.status, orderStatuses)}</td><td class="dashboard-arrival">${arrival}</td></tr>`;
-            }).join('') || emptyRow(3, '暂无运单')}</tbody></table>
-          </div>
-        </section>
-      </div>
+      <section class="dashboard-section dashboard-orders" aria-labelledby="dashboard-orders">
+        <header class="panel-head"><h2 class="subhead" id="dashboard-orders">近期运单</h2><a class="link" href="#orders">全部运单 ${icon('arrow')}</a></header>
+        <div class="dashboard-table">
+          <table aria-labelledby="dashboard-orders"><thead><tr><th scope="col">运单号 / 路线</th><th scope="col">状态</th><th scope="col">预计送达</th></tr></thead>
+          <tbody>${orders.slice(0, 5).map(order => {
+            const kind = orderType(order);
+            const arrival = ['delivered', 'cancelled'].includes(order.status)
+              ? '—'
+              : order.shipment.pickupDate && order.rate?.businessDays?.length ? e(arrivalText(order, order.rate)) : '待确认';
+            return `<tr><td><a class="link" href="${e(orderRecordHref(kind, order))}">${e(order.id)}</a><small>${routeLabel(order.shipment)}</small></td>
+              <td>${status(order.status, orderStatuses)}</td><td class="dashboard-arrival">${arrival}</td></tr>`;
+          }).join('') || emptyRow(3, '暂无运单')}</tbody></table>
+        </div>
+      </section>
       <section class="dashboard-section dashboard-updates" aria-labelledby="dashboard-updates">
-        <header class="panel-head"><h2 class="subhead" id="dashboard-updates">公告与更新</h2></header>
+        <h2 class="subhead" id="dashboard-updates">公告与更新</h2>
         <ul>${updates.map(([title, summary, href, label]) => `<li><h3>${title}</h3><p>${summary}</p><a class="link" href="${href}">${label} ${icon('chev')}</a></li>`).join('')}</ul>
       </section>
     </div>
