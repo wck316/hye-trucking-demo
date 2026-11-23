@@ -1,4 +1,4 @@
-import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=hye-freight';
+import { addressValue, dateInZone, emptyItem, postalCode, serviceOptions, unitSettings } from './model.js?v=account-layout';
 
 const sides = ['origin', 'destination'];
 const number = '(\\d+(?:[,.]\\d+)*)';

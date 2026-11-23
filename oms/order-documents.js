@@ -1,11 +1,14 @@
 import {
-  chargedBillStatus, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
-  packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=hye-freight';
-import { e } from './views.js?v=work-hours-2';
+  billStatusText, billAmountLabel, rebillCollectionRule, rebillCountdownText, rebillMethodText, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
+  packaging, selectedServices, stopSupplement, totals, customShipmentStops, customCargoRoute
+} from './model.js?v=account-layout';
+import { e } from './views.js?v=account-layout';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
+  if (order.shipment.mode === 'custom' && order.shipment.stops) {
+    return customShipmentStops(order.shipment, details)[side].map((point, index) => `<section><h2>${title} ${index + 1}</h2><p>${e(point.address)}</p>${point.date ? `<p>${e(point.date)}</p>` : ''}${includeContact ? `<p>${e([point.contact, point.phone, point.phoneExtension && 'ext. ' + point.phoneExtension].filter(Boolean).join(' · '))}</p>${point.reference ? `<p>Ref. ${e(point.reference)}</p>` : ''}${point.notes ? `<p>${e(point.notes)}</p>` : ''}` : ''}</section>`).join('');
+  }
   const { reference, notes } = stopSupplement(details, side);
   const company = details[side + 'Company'];
   const phone = [details[side + 'Phone'], details[side + 'PhoneExtension'] && 'ext. ' + details[side + 'PhoneExtension']].filter(Boolean).join(' ');
@@ -19,10 +22,12 @@ function stop(order, side, title, includeContact = true) {
 function bol(order) {
   const items = order.shipment.items.map((item, index) => {
     const commodities = itemCommodities(item, index === 0 ? order.details?.commodity : '');
+    const route = order.shipment.stops && customCargoRoute(item, order.shipment.stops);
+    const routeLabel = route ? 'A' + (order.shipment.stops.origin.findIndex(stop => stop.id === route.originStopId) + 1) + ' → B' + (order.shipment.stops.destination.findIndex(stop => stop.id === route.destinationStopId) + 1) : '';
     const names = commodities.map(commodity => [commodity.description, commodity.nmfc && 'NMFC ' + commodity.nmfc,
       commodity.freightClass && 'Class ' + commodity.freightClass,
       commodity.regulated.includes('hazmat') && commodity.hazmat?.hazardId].filter(Boolean).join(' · ')).filter(Boolean);
-    return `<tr><td>${e(item.quantity)}</td><td>${e(packaging[item.type])}${names.map(name => `<small>${e(name)}</small>`).join('')}</td>
+    return `<tr><td>${e(item.quantity)}</td><td>${e(packaging[item.type])}${routeLabel ? `<small>${e(routeLabel)}</small>` : ''}${names.map(name => `<small>${e(name)}</small>`).join('')}</td>
       <td>${e([item.length, item.width, item.height].join(' × '))} in</td><td>${e(item.weight)} lb</td></tr>`;
   }).join('');
   const services = ['origin', 'destination'].flatMap(side => selectedServices(order.shipment, side)
@@ -38,8 +43,13 @@ function label(order) {
 }
 
 function billDocument(bill) {
-  const rows = [...bill.charges, ['已扣款金额 (USD)', bill.total]];
-  return `<section><h2>${e(bill.id)}</h2><p>扣款日期 ${e(bill.chargedOn || '—')} · ${chargedBillStatus}</p>
+  const rows = [...bill.charges, [billAmountLabel(bill) + ' (USD)', bill.total]];
+  const payment = bill.originalId ? `<p>出账日期 ${e(bill.issuedOn || '—')} · ${e(billStatusText(bill))}</p>
+    <p>${bill.paymentStatus === 'collected' ? '扣款日期 ' + e(bill.collectedOn || '—') : '申诉截止（PT）' + e(bill.appealDeadline ? bill.appealDeadline + ' 00:00' : '待确认')}</p>
+    <p>${e(rebillCountdownText(bill))}</p><p>扣款说明 ${e(rebillMethodText(bill))}</p>
+    <p class="muted">${e(rebillCollectionRule)}</p><p class="demo">演示账单流程 · 日期按 PT 计算</p>`
+    : `<p>扣款日期 ${e(bill.chargedOn || '—')} · ${e(billStatusText(bill))}</p>`;
+  return `<section><h2>${e(bill.id)}</h2>${payment}
     ${bill.originalId ? `<p>原账单 ${e(bill.originalId)}</p>` : ''}</section>
     <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${e(name)}</th><td>${money(value)}</td></tr>`).join('')}</tbody></table></section>
     ${bill.reason ? `<section><h2>补收说明</h2><p class="muted">${e(bill.reason)}</p></section>` : ''}`;
@@ -59,7 +69,7 @@ export function orderDocument(order, kind, billId) {
   if (billing && !bill) return null;
   const [name, description] = orderDocuments[kind];
   const title = `${name} · ${description}`;
-  const carrier = carrierProfiles[order.rate.carrierId]?.name ?? '承运商未记录';
+  const carrier = carrierProfiles[order.rate.carrierId]?.name ?? order.rate.carrierName ?? '承运商未记录';
   return {
     name: `${bill ? bill.id : `${name}-${order.id}`}.html`,
     html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · ${e(order.id)}</title>

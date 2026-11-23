@@ -7,9 +7,9 @@
   <title>HYE Freight | 客户门户</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e56ef'/%3E%3Cpath d='M19 16h8v12h10V16h8v32h-8V36H27v12h-8z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="../assets/leaflet/leaflet.css">
-  <link rel="stylesheet" href="oms.css?v=phone-input">
+  <link rel="stylesheet" href="oms.css?v=account-layout">
   <script defer src="../assets/leaflet/leaflet.js"></script>
-  <script type="module" src="app.js?v=work-hours-2"></script>
+  <script type="module" src="app.js?v=account-layout"></script>
 </head>
 <body>
   <svg xmlns="http://www.w3.org/2000/svg" class="symbols" aria-hidden="true">
@@ -56,6 +56,7 @@
         <div class="topbar-context">
           <button type="button" class="icon-button mobile-menu" id="menu-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#menu"/></svg></button>
           <div id="breadcrumb" class="breadcrumb">工作台</div>
+          <nav id="custom-inquiry-nav" class="custom-top-tabs" aria-label="定制询价" hidden></nav>
           <span class="portal-label">HYE Freight 客户门户</span>
         </div>
         <div class="topbar-actions">

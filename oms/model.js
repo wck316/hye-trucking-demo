@@ -27,7 +27,7 @@ const residentialFee = 5500;
 
 export function addressTypeFor(shipment, side) {
   // Older quotes recorded residential addresses as an optional service.
-  return shipment.addressTypes?.[side] ?? (shipment.services[side].includes('residential') ? 'residential' : '');
+  return shipment.addressTypes?.[side] ?? (shipment.services?.[side]?.includes('residential') ? 'residential' : '');
 }
 
 export const zones = {
@@ -69,6 +69,14 @@ export const orderType = order => order.shipment.mode === 'custom' ? 'custom' : 
 export const orderRoute = kind => kind === 'ltl' ? '#orders' : '#orders/' + kind;
 export const orderRecordHref = (kind, record) => orderRoute(kind) + '/' + record.id;
 export const chargedBillStatus = '已扣款';
+export const rebillStatuses = { waiting: '等待处理', disputing: '正在申诉', completed: '处理完成' };
+export const rebillCollectionRule = '请在出账后 5 个工作日内发起申诉，逾期未申诉将自动扣款。不含出账当天，工作日按周一至周五计算。';
+export const billStatusText = bill => bill.originalId ? rebillStatuses[bill.workflowStatus] ?? rebillStatuses.waiting : chargedBillStatus;
+export const billAmountLabel = bill => !bill.originalId || bill.paymentStatus === 'collected' ? '已扣款金额' : '应付金额';
+export const rebillCountdownText = bill => bill.workflowStatus === 'disputing' ? (bill.paymentStatus === 'collected' ? '账单已扣款，申诉处理中' : '申诉处理中，暂缓扣款')
+  : bill.paymentStatus === 'collected' ? '已扣款' : bill.appealDaysRemaining == null ? '申诉期限待确认' : `剩余 ${bill.appealDaysRemaining} 个工作日可申诉`;
+export const rebillMethodText = bill => bill.paymentStatus === 'held' ? '申诉处理中，暂缓扣款' : bill.paymentStatus !== 'collected' ? '逾期未申诉将自动扣款' : bill.collectionMethod === 'early' ? '客户提前确认扣款' : '逾期未申诉自动扣款';
+
 export const ticketStatuses = { pending: '待处理', processing: '处理中', closed: '已关闭' };
 export const ticketCategories = {
   tracking: '运输跟踪', stops: '提送货问题', 'order-change': '订单变更', billing: '账单费用', documents: '文件与回单', damage: '货损理赔', other: '其他'
@@ -142,6 +150,40 @@ export function emptyShipment(mode = 'ltl') {
   };
 }
 
+export function emptyCustomStop() {
+  return { id: idFor('STOP-'), address: '', addressType: '', date: '', contact: '', phone: '', phoneExtension: '', reference: '', notes: '', services: [] };
+}
+
+export function customShipmentStops(shipment, details = {}) {
+  return Object.fromEntries(sides.map(side => [side, shipment.stops?.[side]?.length ? shipment.stops[side] : [{
+    id: side, address: shipment[side] ?? '', addressType: addressTypeFor(shipment, side) ?? '',
+    date: shipment[side === 'origin' ? 'pickupDate' : 'deliveryDate'] ?? '',
+    contact: details[side + 'Contact'] ?? '', phone: details[side + 'Phone'] ?? '',
+    phoneExtension: details[side + 'PhoneExtension'] ?? '', company: details[side + 'Company'] ?? '',
+    unit: details[side + 'Unit'] ?? '', email: details[side + 'Email'] ?? '',
+    reference: details[side + 'Reference'] ?? '', notes: details[side + 'Notes'] ?? '',
+    services: shipment.services?.[side] ?? []
+  }]]));
+}
+
+export function customCargoRoute(item, stops) {
+  return Object.fromEntries(sides.map(side => {
+    const key = side + 'StopId';
+    const id = item[key] ?? (stops[side].length === 1 ? stops[side][0].id : '');
+    return [key, stops[side].some(stop => stop.id === id) ? id : ''];
+  }));
+}
+
+// Stable custom cargo identities keep removals and insertions distinct from edits.
+export function customCargoIdentities(shipment, baseline = true) {
+  return { ...shipment, items: (shipment.items ?? []).map((item, index) => ({ ...item,
+    customId: item.customId ?? (baseline ? 'cargo-' + (index + 1) : idFor('CI-')),
+    commodities: itemCommodities(item).map((commodity, position) => ({ ...commodity,
+      customId: commodity.customId ?? (baseline ? 'commodity-' + (position + 1) : idFor('CC-'))
+    }))
+  })) };
+}
+
 export function exampleShipment(mode = 'ltl') {
   return {
     ...emptyShipment(mode),
@@ -152,6 +194,52 @@ export function exampleShipment(mode = 'ltl') {
     services: { origin: [], destination: ['appointment'] },
     items: [{ type: 'pallet', quantity: mode === 'ftl' ? 20 : 2, weight: 400, length: 48, width: 40, height: 48 }],
     ...(mode === 'ftl' ? { equipment: 'van' } : {})
+  };
+}
+
+export function exampleCustomShipment() {
+  const origin = [
+    {
+      ...emptyCustomStop(), address: addressValue(demoAddresses[0]), addressType: 'commercial-dock',
+      date: dateInZone(defaultZone, 1), contact: '洛杉矶仓库联系人', phone: '+1 213 555 0101', phoneExtension: '101',
+      reference: 'PU-LA-DEMO-001', notes: '从西门进入，提取货物 1，共 10 托盘。'
+    },
+    {
+      ...emptyCustomStop(), address: '411 Demo Road, Phoenix, AZ 85001', addressType: 'commercial-no-dock',
+      date: dateInZone(defaultZone, 2), contact: '凤凰城仓库联系人', phone: '+1 602 555 0102', phoneExtension: '102',
+      reference: 'PU-PHX-DEMO-002', notes: '抵达后联系现场人员，提取货物 2，共 3 托盘。', services: ['liftgate']
+    }
+  ];
+  const destination = [
+    {
+      ...emptyCustomStop(), address: addressValue(demoAddresses[1]), addressType: 'commercial-dock',
+      date: dateInZone(defaultZone, 5), contact: '芝加哥收货联系人', phone: '+1 312 555 0103', phoneExtension: '201',
+      reference: 'DEL-CHI-DEMO-001', notes: '卸下货物 1，共 10 托盘，到收货窗口登记。', services: ['appointment', 'notify']
+    },
+    {
+      ...emptyCustomStop(), address: '88 Sample Drive, Indianapolis, IN 46201', addressType: 'commercial-no-dock',
+      date: dateInZone(defaultZone, 6), contact: '印第安纳波利斯收货联系人', phone: '+1 317 555 0104', phoneExtension: '202',
+      reference: 'DEL-IND-DEMO-002', notes: '卸下货物 2，共 3 托盘，需要尾板卸货。', services: ['liftgate', 'appointment']
+    }
+  ];
+  return {
+    ...emptyShipment(), stops: { origin, destination },
+    origin: origin[0].address, destination: destination[1].address,
+    pickupDate: origin[0].date, deliveryDate: destination[1].date,
+    addressTypes: { origin: origin[0].addressType, destination: destination[1].addressType },
+    services: { origin: ['liftgate'], destination: ['appointment', 'notify', 'liftgate'] },
+    items: [
+      {
+        type: 'pallet', quantity: 10, weight: 400, length: 48, width: 40, height: 48,
+        originStopId: origin[0].id, destinationStopId: destination[0].id,
+        commodities: [{ ...emptyCommodity(), description: '服装（纸箱包装）', declaredValue: '12000', pieceType: 'carton', pieceCount: '12' }]
+      },
+      {
+        type: 'pallet', quantity: 3, weight: 400, length: 48, width: 40, height: 60,
+        originStopId: origin[1].id, destinationStopId: destination[1].id,
+        commodities: [{ ...emptyCommodity(), description: '家具配件（加固包装）', declaredValue: '4500', pieceType: 'box', pieceCount: '4' }]
+      }
+    ]
   };
 }
 
@@ -390,27 +478,96 @@ export const detailsReady = quote => sides.every(side => stopDetailsReady(quote,
 export const invoiceId = order => 'INV-' + order.id.slice(4);
 export const orderChargeDate = order => order.date || order.issued || '';
 
-export function billingRecords(orders) {
+function calendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return null;
+  const date = new Date(value + 'T12:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? date : null;
+}
+export function addBusinessDays(value, days = 5) {
+  const date = calendarDate(value);
+  if (!date || !Number.isInteger(days) || days < 0) return '';
+  for (let remaining = days; remaining > 0;) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    if (![0, 6].includes(date.getUTCDay())) remaining--;
+  }
+  return date.toISOString().slice(0, 10);
+}
+export function businessDaysRemaining(today, deadline) {
+  const date = calendarDate(today);
+  if (!date || !calendarDate(deadline)) return null;
+  let days = 0;
+  while (date.toISOString().slice(0, 10) < deadline) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    if (![0, 6].includes(date.getUTCDay())) days++;
+  }
+  return days;
+}
+function billingDay(at) {
+  const date = new Date(at ?? NaN);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: defaultZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date) : '';
+}
+
+export function billingRecords(orders, today = dateInZone(defaultZone), tickets = currentState().tickets) {
   return orders.flatMap(order => {
+    const chargedOn = orderChargeDate(order);
     const bill = {
-      id: invoiceId(order), orderId: order.id, chargedOn: orderChargeDate(order),
-      total: order.rate.total, charges: [['运输费用', order.rate.freight], ['附加服务', order.rate.accessorial]]
+      id: invoiceId(order), orderId: order.id, issuedOn: chargedOn, chargedOn,
+      paymentStatus: 'charged', total: order.rate.total, charges: [['运输费用', order.rate.freight], ['附加服务', order.rate.accessorial]]
     };
-    const adjustment = {
+    const example = {
       'HYE-DEMO-102': { label: '送货尾板费', amount: 6500, reason: '送货现场使用了尾板，原账单未包含此项服务。', daysAfterBooking: 2 },
       'HYE-DEMO-101': { label: '提货等候费', amount: 4500, reason: '提货超出免费等候时间，承运商补收等候费。', daysAfterBooking: 3 }
     }[order.id];
-    if (!adjustment) return [bill];
-    const adjustmentDate = Date.parse(bill.chargedOn + 'T00:00:00Z');
-    const chargedOn = Number.isFinite(adjustmentDate)
-      ? new Date(adjustmentDate + adjustment.daysAfterBooking * 86400000).toISOString().slice(0, 10)
-      : '';
-    return [bill, {
-      id: 'RB-' + order.id.slice(4), orderId: order.id, originalId: bill.id,
-      chargedOn, total: adjustment.amount,
-      reason: adjustment.reason, charges: [[adjustment.label, adjustment.amount]]
-    }];
+    const adjustments = Array.isArray(order.rebills) ? order.rebills : example ? [example] : [];
+    const rebills = adjustments.map((adjustment, index) => {
+      const issueDate = calendarDate(chargedOn);
+      const offsetDays = Number(adjustment.daysAfterBooking ?? 0);
+      if (issueDate && Number.isInteger(offsetDays)) issueDate.setUTCDate(issueDate.getUTCDate() + offsetDays);
+      const issuedOn = adjustment.issuedOn ?? (issueDate && Number.isInteger(offsetDays) && Number.isFinite(issueDate.getTime()) ? issueDate.toISOString().slice(0, 10) : '');
+      const autoCollectOn = addBusinessDays(issuedOn);
+      const id = adjustment.id ?? 'RB-' + order.id.slice(4) + (index ? '-' + (index + 1) : '');
+      const charges = adjustment.charges ?? [[adjustment.label, adjustment.amount]];
+      const total = adjustment.total ?? adjustment.amount ?? charges.reduce((sum, [, value]) => sum + value, 0);
+      const storedPayment = order.rebillPayments?.[id];
+      const payment = storedPayment?.total === total ? storedPayment : undefined;
+      const disputes = tickets.filter(ticket => ticket.kind === 'disputes' && ticket.billId === id);
+      const activeDispute = disputes.find(ticket => ticket.status !== 'closed');
+      const timely = ticket => !autoCollectOn || !billingDay(ticket.createdAt) || billingDay(ticket.createdAt) < autoCollectOn;
+      const held = Boolean(activeDispute && timely(activeDispute) && !payment);
+      // Demo-only collection: an unresolved timely dispute blocks deduction.
+      const collected = Boolean(payment) || Boolean(!held && autoCollectOn && calendarDate(today) && today >= autoCollectOn);
+      const resolvedOn = disputes.filter(ticket => ticket.status === 'closed' && timely(ticket)).map(ticket => billingDay(ticket.updatedAt)).filter(day => day && day <= today);
+      const automaticOn = [autoCollectOn, ...resolvedOn].sort().at(-1);
+      const collectedOn = collected ? payment?.collectedOn ?? automaticOn : '';
+      return {
+        id, orderId: order.id, originalId: bill.id, issuedOn, autoCollectOn,
+        paymentStatus: collected ? 'collected' : held ? 'held' : 'scheduled',
+        workflowStatus: activeDispute ? 'disputing' : collected ? 'completed' : 'waiting',
+        appealDeadline: autoCollectOn, appealDaysRemaining: businessDaysRemaining(today, autoCollectOn), disputeId: activeDispute?.id ?? '',
+        collectedOn, chargedOn: collectedOn,
+        collectionMethod: collected ? payment?.method ?? 'automatic' : '',
+        collectionId: payment?.id ?? '', collectionSimulated: true,
+        total, reason: adjustment.reason, charges
+      };
+    });
+    return [bill, ...rebills];
   });
+}
+
+export function collectRebillEarly(billId, expectedTotal) {
+  const state = currentState();
+  const bill = billingRecords(state.orders).find(entry => entry.id === billId && entry.originalId);
+  if (!bill) return { error: '找不到这张补收账单，请刷新后重试。' };
+  if (bill.total !== Number(expectedTotal)) return { error: '补收金额已变化，请重新核对账单后确认。' };
+  if (bill.paymentStatus === 'collected') return { bill, alreadyCollected: true };
+  if (bill.workflowStatus === 'disputing') return { error: '该补收账单正在申诉，请先处理或撤回申诉。' };
+  const today = dateInZone(defaultZone);
+  if (!calendarDate(bill.issuedOn) || bill.issuedOn > today) return { error: '该补收账单尚未正式出具。' };
+  const payment = { id: idFor('DEMO-PAY-'), total: bill.total, collectedOn: today, collectedAt: Date.now(), method: 'early', simulated: true };
+  persist({ ...state, orders: state.orders.map(order => order.id === bill.orderId ? {
+    ...order, rebillPayments: { ...order.rebillPayments, [bill.id]: payment }
+  } : order) });
+  return { bill: billingRecords(currentState().orders).find(entry => entry.id === bill.id) };
 }
 
 export const billHref = bill => bill.originalId ? `#billing/rebills/${bill.id}` : `#billing/${bill.orderId}`;
@@ -525,6 +682,59 @@ function persist(state) {
   }
 }
 
+export const walletKinds = { opening: '初始入账', topup: '充值入账', freight: '运费扣款', rebill: '补收扣款' };
+function walletConfig(state) {
+  const dates = state.orders.map(orderChargeDate).filter(date => calendarDate(date)).sort();
+  const firstDay = calendarDate(dates[0] ?? dateInZone());
+  firstDay.setUTCDate(firstDay.getUTCDate() - 1);
+  return state.wallet ?? { openingBalance: 1000000, openingOn: firstDay.toISOString().slice(0, 10), topups: [] };
+}
+export function walletSnapshot(state = currentState()) {
+  const wallet = walletConfig(state);
+  const bills = billingRecords(state.orders, dateInZone(), state.tickets);
+  const topups = wallet.topups ?? [];
+  const transactions = [{ id: 'BALANCE-OPENING', kind: 'opening', date: wallet.openingOn, at: 0,
+    amount: wallet.openingBalance, description: '演示初始入账', reference: '', billId: '', orderId: '' },
+    ...topups.map(entry => ({ ...entry, kind: 'topup', at: entry.createdAt, description: entry.note || '演示余额充值', reference: entry.id })),
+    ...bills.filter(bill => ['charged', 'collected'].includes(bill.paymentStatus)).map(bill => {
+      const order = state.orders.find(order => order.id === bill.orderId);
+      return { id: 'WL-' + bill.id, kind: bill.originalId ? 'rebill' : 'freight', date: bill.chargedOn,
+        at: (bill.originalId ? order?.rebillPayments?.[bill.id]?.collectedAt : order?.createdAt) ?? Date.parse(bill.chargedOn + 'T00:00:00Z'),
+        amount: -bill.total, description: bill.originalId ? bill.reason || bill.charges.map(([label]) => label).join('、') : '运输订单扣款',
+        reference: bill.id, billId: bill.id, orderId: bill.orderId, href: billHref(bill) };
+    })];
+  transactions.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.at - b.at || a.id.localeCompare(b.id));
+  let balance = 0;
+  const ledger = transactions.map(entry => { balance += entry.amount; return { ...entry, balance }; });
+  const credits = transactions.filter(entry => entry.amount > 0).reduce((sum, entry) => sum + entry.amount, 0);
+  const debits = transactions.filter(entry => entry.amount < 0).reduce((sum, entry) => sum - entry.amount, 0);
+  const pending = bills.filter(bill => bill.originalId && bill.paymentStatus !== 'collected');
+  return { balance, credits, debits, pendingAmount: pending.reduce((sum, bill) => sum + bill.total, 0), pendingCount: pending.length,
+    disputedAmount: pending.filter(bill => bill.workflowStatus === 'disputing').reduce((sum, bill) => sum + bill.total, 0),
+    transactions: ledger.reverse() };
+}
+export function walletRechargeAmount(amount) {
+  const value = String(amount ?? '').trim();
+  if (!/^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/.test(value)) return { error: '请输入有效的美元金额，最多两位小数。' };
+  const [whole, fraction = ''] = value.split('.');
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  if (cents < 100 || cents > 10000000) return { error: '单次演示充值金额为 1–100,000 USD。' };
+  return { cents };
+}
+export function rechargeWallet({ amount, note = '', token }) {
+  const parsed = walletRechargeAmount(amount);
+  if (parsed.error) return parsed;
+  const { cents } = parsed;
+  if (typeof token !== 'string' || !/^[a-zA-Z0-9-]{8,100}$/.test(token)) return { error: '充值请求已失效，请重新填写。' };
+  const state = currentState();
+  const wallet = walletConfig(state);
+  const previous = wallet.topups?.find(entry => entry.token === token);
+  if (previous) return previous.amount === cents ? { entry: previous, alreadyRecharged: true } : { error: '充值金额已变化，请重新确认。' };
+  const entry = { id: idFor('TOPUP-'), token, amount: cents, note: String(note).trim().slice(0, 150), date: dateInZone(), createdAt: Date.now(), simulated: true };
+  persist({ ...state, wallet: { ...wallet, topups: [entry, ...(wallet.topups ?? [])] } });
+  return { entry };
+}
+
 export function validateCase(state, { kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description }) {
   if (!Object.hasOwn(caseTypes, kind) || !subject || !description || !caseCategory({ kind, category })) return '请填写问题类型、主题和说明。';
   if (kind === 'disputes') {
@@ -544,7 +754,7 @@ export function validateCase(state, { kind = 'tickets', subject, category, order
   return '';
 }
 
-export function createTicket({ kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description, orderChange }, files = []) {
+export function createTicket({ kind = 'tickets', subject, category, orderId, billId, charge, requestedAmount, description, orderChange, customRequestId, customChange }, files = []) {
   const state = currentState();
   if (validateCase(state, { kind, subject, category, orderId, billId, charge, requestedAmount, description })) return;
   if (kind === 'disputes') orderId = billingRecords(state.orders).find(bill => bill.id === billId).orderId;
@@ -554,6 +764,7 @@ export function createTicket({ kind = 'tickets', subject, category, orderId, bil
     ...(kind === 'disputes' ? { billId, charge } : {}),
     ...(kind === 'claims' && requestedAmount ? { requestedAmount: Math.round(Number(requestedAmount) * 100) } : {}),
     ...(orderChange ? { orderChange } : {}),
+    ...(customRequestId && customChange ? { customRequestId, customChange } : {}),
     messages: [{ by: 'customer', text: description, at, files }]
   };
   persist({ ...state, tickets: [ticket, ...state.tickets] });
@@ -567,7 +778,7 @@ export function updateTicket(id, reply = '', files = []) {
   const at = Date.now();
   const responding = Boolean(reply || files.length);
   const entry = responding ? { by: 'customer', text: reply, at, files }
-    : { by: 'system', text: ticket.orderChange ? '变更申请已撤回' : caseTypes[caseKind(ticket)].label + '已关闭', at };
+    : { by: 'system', text: ticket.orderChange || ticket.customChange ? '变更申请已撤回' : caseTypes[caseKind(ticket)].label + '已关闭', at };
   const updated = { ...ticket, status: responding ? ticket.status : 'closed', updatedAt: at, messages: [...ticket.messages, entry] };
   persist({ ...state, tickets: state.tickets.map(ticket => ticket.id === id ? updated : ticket) });
   return updated;
@@ -575,9 +786,113 @@ export function updateTicket(id, reply = '', files = []) {
 
 export function saveCustomRequest(fields) {
   const state = currentState();
-  const request = { ...fields, id: idFor('CQ-'), date: dateInZone() };
+  const request = { ...structuredClone(fields), id: idFor('CQ-'), date: dateInZone(), revision: 1, createdAt: Date.now(), updatedAt: Date.now() };
   persist({ ...state, customRequests: [request, ...(state.customRequests ?? [])] });
   return request;
+}
+
+export const customRequestStatuses = { waiting: '待报价', reviewing: '修改审核中', quoted: '可下单', expired: '报价已过期', booked: '已下单' };
+export function customChangeTicket(request, tickets = currentState().tickets) {
+  return tickets.find(ticket => ticket.customRequestId === request?.id && ticket.customChange && ticket.status !== 'closed');
+}
+export function customRequestStatus(request, tickets = currentState().tickets) {
+  if (request.orderId) return 'booked';
+  if (customChangeTicket(request, tickets)) return 'reviewing';
+  if (!request.quote || request.quote.revision !== (request.revision ?? 1)) return 'waiting';
+  return request.quote.expiresAt > Date.now() ? 'quoted' : 'expired';
+}
+function customRequestData(request) {
+  const data = structuredClone({ ...Object.fromEntries(['contact', 'email', 'phone', 'requirements'].map(key => [key, request[key] ?? ''])),
+    shipment: request.shipment || { ...emptyShipment(), origin: request.origin ?? '', destination: request.destination ?? '' }, details: request.details ?? {}, units: request.units ?? 'imperial' });
+  const stops = customShipmentStops(data.shipment, data.details || {});
+  const endpoints = { origin: stops.origin[0], destination: stops.destination.at(-1) };
+  data.shipment = { ...customCargoIdentities(data.shipment), stops, origin: endpoints.origin.address, destination: endpoints.destination.address,
+    pickupDate: endpoints.origin.date, deliveryDate: endpoints.destination.date,
+    addressTypes: Object.fromEntries(sides.map(side => [side, endpoints[side].addressType])),
+    services: Object.fromEntries(sides.map(side => [side, [...new Set(stops[side].flatMap(stop => stop.services ?? []))].sort()])) };
+  data.details = { ...data.details, ...Object.fromEntries(sides.flatMap(side => ['Contact', 'Phone', 'PhoneExtension', 'Reference', 'Notes'].map(key => [side + key, endpoints[side][key[0].toLowerCase() + key.slice(1)] ?? '']))) };
+  return data;
+}
+function customDataSignature(value, key = '') {
+  if (typeof value === 'string') return /phone$/i.test(key) ? value.replace(/[^+0-9]/g, '') : value.trim();
+  if (Array.isArray(value)) return value.map(entry => customDataSignature(entry));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).filter(key => !['customId', 'units'].includes(key)).sort().flatMap(key => {
+    const entry = customDataSignature(value[key], key);
+    return entry === '' || entry == null || (typeof entry === 'object' && !Object.keys(entry).length) ? [] : [[key, entry]];
+  }));
+  return value;
+}
+
+function customDataError(data) {
+  if (!data.shipment?.items?.length || !data.requirements?.trim() || !data.contact?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email ?? '')) return '请填写需求说明、联系人和有效邮箱。';
+  const groups = customShipmentStops(data.shipment, data.details);
+  const stops = [...groups.origin, ...groups.destination];
+  if (stops.some(stop => !stop.address?.trim())) return '请填写所有提送货地点。';
+  const dates = stops.filter(stop => stop.date).map(stop => stop.date);
+  if (dates.some((date, index) => index && date < dates[index - 1])) return '请检查各地点日期的先后顺序。';
+  if (data.shipment.items.some(item => { const route = customCargoRoute(item, groups); return !route.originStopId || !route.destinationStopId; })) return '请为每批货物选择有效的提货点和送货点。';
+  if (!cargoReady(data.shipment) || !hazardDeclarationsReady(data.shipment)) return '请检查货物和危险品申报。';
+  return '';
+}
+export function submitCustomRequestChange(requestId, fields, revision, reason) {
+  const state = currentState();
+  const request = state.customRequests?.find(entry => entry.id === requestId);
+  if (!request || request.orderId) return { error: '该询价已下单或不存在，请在订单管理中提交变更。' };
+  if (customChangeTicket(request, state.tickets)) return { error: '已有待审核的修改申请，请先处理或撤回。' };
+  if ((request.revision ?? 1) !== Number(revision)) return { error: '资料已更新，请重新打开修改页面。' };
+  const after = customRequestData(fields);
+  const before = customRequestData(request);
+  const error = customDataError(after);
+  if (error) return { error };
+  if (!reason?.trim()) return { error: '请填写修改说明。' };
+  if (JSON.stringify(customDataSignature(before)) === JSON.stringify(customDataSignature(after))) return { error: '尚未修改资料。' };
+  const ticket = createTicket({ category: 'other', subject: '定制询价资料修改申请', description: reason.trim(), customRequestId: requestId,
+    customChange: { before, after, revision: request.revision ?? 1 } });
+  return ticket ? { ticket } : { error: '无法提交修改申请，请重试。' };
+}
+// Demo-only support action. Approved snapshots and quotes are committed together.
+export function simulateCustomResponse(requestId, decision = 'approve', expectedTicketId, expectedRevision) {
+  const state = currentState();
+  const request = state.customRequests?.find(entry => entry.id === requestId);
+  if (!request || request.orderId) return { error: '该询价无法再更新报价。' };
+  const pending = customChangeTicket(request, state.tickets);
+  if (pending && pending.customChange.revision !== (request.revision ?? 1)) return { error: '申请版本已过期，请撤回后重新提交。' };
+  const at = Date.now();
+  if ((expectedTicketId !== undefined && (pending?.id ?? '') !== expectedTicketId) || (expectedRevision !== undefined && Number(expectedRevision) !== (request.revision ?? 1))) return { error: '审核资料已变化，请关闭后重新核对。' };
+  const rejected = pending && decision === 'reject';
+  const data = pending && !rejected ? pending.customChange.after : customRequestData(request);
+  const error = customDataError(data);
+  if (!rejected && error) return { error };
+  const revision = (request.revision ?? 1) + (pending && !rejected ? 1 : 0);
+  let quote = request.quote;
+  if (!rejected) {
+    const groups = customShipmentStops(data.shipment, data.details);
+    const freight = Math.round(48000 + totals(data.shipment).weight * 38 + (groups.origin.length + groups.destination.length - 2) * 12500);
+    const accessorial = sides.reduce((sum, side) => sum + groups[side].reduce((subtotal, stop) => subtotal + serviceOptions[side].filter(service => (stop.services ?? []).includes(service.id)).reduce((fees, service) => fees + service.fee, 0), 0), 0);
+    quote = { id: idFor('CQT-'), reference: idFor('CQR-'), revision, simulated: true, carrierId: 'custom', carrierName: 'HYE Freight 定制运输', name: '多点提送方案', days: '按约定交接日期安排', freight, accessorial, total: freight + accessorial, createdAt: at, expiresAt: at + 86400000 };
+  }
+  const updated = { ...request, ...structuredClone(data), revision, quote, updatedAt: at };
+  const tickets = pending ? state.tickets.map(ticket => ticket.id === pending.id ? { ...ticket, status: 'closed', resolution: rejected ? 'rejected' : 'approved', updatedAt: at,
+    messages: [...ticket.messages, { by: 'support', text: rejected ? '【演示】修改申请未通过，保留原资料。' : '【演示】修改申请已审核通过，资料和报价已更新。', at }] } : ticket) : state.tickets;
+  persist({ ...state, tickets, customRequests: state.customRequests.map(entry => entry.id === requestId ? updated : entry) });
+  return { request: updated };
+}
+export function bookCustomRequest(requestId, quoteId) {
+  const state = currentState();
+  const request = state.customRequests?.find(entry => entry.id === requestId);
+  if (!request) return { error: '询价不存在。' };
+  const existing = state.orders.find(order => order.customRequestId === requestId);
+  if (existing) return { order: existing };
+  if (customRequestStatus(request, state.tickets) !== 'quoted' || request.quote.id !== quoteId) return { error: '报价已变更、过期或资料正在审核，请核对最新报价后再下单。' };
+  const error = customDataError(request);
+  if (error) return { error };
+  const at = Date.now();
+  const order = { id: idFor('HYE-'), customRequestId: requestId, quoteId, date: dateInZone(), createdAt: at, status: 'ready',
+    shipment: { ...structuredClone(request.shipment), mode: 'custom' }, details: structuredClone(request.details ?? {}),
+    rate: structuredClone(request.quote), units: request.units, requirements: request.requirements,
+    inquiryContact: { contact: request.contact, email: request.email, phone: request.phone }, reference: request.id };
+  persist({ ...state, orders: [order, ...state.orders], customRequests: state.customRequests.map(entry => entry.id === requestId ? { ...entry, orderId: order.id, updatedAt: at } : entry) });
+  return { order };
 }
 
 function storeQuote(state, quote) {
@@ -631,7 +946,7 @@ export function bookOrder(quoteId) {
 
   const order = {
     id: 'HYE-' + quote.id.slice(3), quoteId, reference, details: quote.details, shipment, rate,
-    date: dateInZone(), status: 'ready'
+    date: dateInZone(), createdAt: Date.now(), status: 'ready'
   };
   persist({ ...state, orders: [order, ...state.orders] });
   return order;

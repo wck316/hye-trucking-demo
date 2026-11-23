@@ -1,5 +1,5 @@
-import { displayAddress, hasStreetAddress, postalCode } from './model.js?v=hye-freight';
-import { locateStreetAddress } from './address-search.js?v=hye-freight';
+import { displayAddress, hasStreetAddress, postalCode } from './model.js?v=account-layout';
+import { locateStreetAddress } from './address-search.js?v=account-layout';
 import { loadZipPoints } from './route-map.js?v=zip-suggestions';
 
 const imageryTiles = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';

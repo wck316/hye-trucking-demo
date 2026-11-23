@@ -1,4 +1,4 @@
-import { addressValue, postalCode } from './model.js?v=hye-freight';
+import { addressValue, postalCode } from './model.js?v=account-layout';
 
 const endpoint = 'https://photon.komoot.io/api/';
 const resultLimit = 6;
