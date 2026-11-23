@@ -1,26 +1,33 @@
 import {
   currentState, emptyShipment, exampleShipment, emptyItem, saveQuote, bookOrder, saveProfile,
-  saveAddress, removeAddress, postalCode, addressValue, unitSettings, billStatuses, billingRecords, billHref,
+  saveAddress, removeAddress, postalCode, addressValue, unitSettings, dateInZone, billingRecords, billHref, money, billStatusText, billAmountLabel, rebillMethodText, collectRebillEarly, walletSnapshot, rechargeWallet, walletRechargeAmount, walletKinds,
   displayMeasurement, updateQuote, refreshQuote, chooseRate, quoteStatus, pricingReady, detailsReady, hasStreetAddress,
-  addressTypes, shortAddress, stopDetailsReady, cargoReady, emptyCommodity, hazardDeclarationsReady, stopHoursReady,
+  addressTypes, shortAddress, stopDetailsReady, cargoReady, emptyCommodity, itemCommodities, hazardDeclarationsReady, stopHoursReady,
   shipmentMode, quoteEntry, quoteModes, orderTypes, orderType, orderRoute, orderRecordHref, saveCustomRequest, addressContactFields, createDemoApiKey, revokeDemoApiKey,
-  createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase
-} from './model.js?v=campaigns';
+  createTicket, updateTicket, caseTypes, caseKind, caseRoute, caseHref, caseCategory, latestCase, validateCase,
+  canClaimOrder, canRequestOrderChange, editableOrderStops, planOrderChange, planOrderCargoChange, planOrderCancellation, submitOrderChange,
+  emptyCustomStop, customShipmentStops, customCargoRoute, customCargoIdentities, exampleCustomShipment, customRequestStatus, customChangeTicket, submitCustomRequestChange, simulateCustomResponse, bookCustomRequest
+} from './model.js?v=account-layout';
 import {
-  quoteView, ratesView, ordersView, billingView, accountView, dashboardView, campaignDetails, orderRows, billRows, billDetail,
+  quoteView, ratesView, ordersView, billingView, accountView, accountTabs, walletContent, walletRows, walletRechargeForm, walletRechargeConfirmation, dashboardView, campaignDetails, orderRows, billRows, billDetail,
   addressRows, addressForm, icon, e, detailsView, quoteSummary, confirmationView, carrierQuotes, workflowHeader,
-  cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView,
-  apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult
-} from './views.js?v=dashboard-hero-first';
-import { renderRouteMap } from './route-map.js?v=campaigns';
-import { orderDocument } from './order-documents.js?v=dashboard-hero-first';
-import { bindAddressSuggestions } from './address-search.js?v=campaigns';
-import { createSatelliteDrawer } from './satellite-preview.js?v=campaigns';
-import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=campaigns';
-import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=campaigns';
+  cargoEditor, cargoTotalsText, cargoItemMetrics, serviceSelectionText, compareRates, orderDetail, customQuoteView, customRecordsView, customInquiryNavigation, customRequestSnapshot, customChangeComparison,
+  apiKeyForm, apiKeyResult, ticketRows, ticketDetail, ticketsView, ticketForm, caseForm, caseChargeOptions, paginationControls, pageSizes, quoteAssistantForm, quoteAssistantResult,
+  orderChangeEditor, orderChangeReview, orderCancellationForm, customRouteSummary, customStopLabel, customStopCargo
+} from './views.js?v=dashboard-offers';
+import { customRequestChanges } from './custom-changes.js?v=account-layout';
+import { renderRouteMap } from './route-map.js?v=zip-suggestions';
+import { orderDocument } from './order-documents.js?v=account-layout';
+import { bindAddressSuggestions } from './address-search.js?v=account-layout';
+import { createSatelliteDrawer } from './satellite-preview.js?v=account-layout';
+import { analyzeQuoteText, applyQuoteText } from './quote-assistant.js?v=dashboard-quote';
+import { saveEvidence, removeEvidence, loadEvidence } from './case-evidence.js?v=zip-suggestions';
+import { initializePhoneInputs, setPhoneInputValue, phoneInputValue } from './phone-input.js?v=phone-input-2';
 
 const workspace = document.querySelector('#workspace');
+const workspaceScrolls = () => getComputedStyle(workspace).overflowY === 'auto';
 const breadcrumb = document.querySelector('#breadcrumb');
+const customInquiryNav = document.querySelector('#custom-inquiry-nav');
 const toolbarAction = document.querySelector('#workflow-action');
 const dialog = document.querySelector('#dialog');
 const satelliteDrawer = createSatelliteDrawer(document.querySelector('#satellite-drawer'));
@@ -31,7 +38,7 @@ let serviceHelpDismissTimer;
 const menuButton = document.querySelector('#menu-button');
 const shade = document.querySelector('#nav-shade');
 const labels = { dashboard: '工作台', quote: '快速查价', rates: '报价比较', details: '完善并下单', custom: '定制询价', orders: '订单管理', tickets: '工单与申诉', billing: '账单管理', account: '账号管理' };
-const filters = Object.fromEntries([...Object.keys(orderTypes), ...Object.keys(caseTypes), 'bills', 'rebills'].map(kind => [kind, { query: '', status: '', page: 1, size: 20 }]));
+const filters = Object.fromEntries([...Object.keys(orderTypes), ...Object.keys(caseTypes), 'bills', 'rebills', 'customRecords', 'wallet'].map(kind => [kind, { query: '', status: '', page: 1, size: 20 }]));
 const rateFiltersByQuote = new Map();
 const stopSides = ['origin', 'destination'];
 const stopFields = ['Company', 'Unit', 'Contact', 'Email', 'Phone', 'PhoneExtension', 'Reference', 'Notes', 'OpensAt', 'ClosesAt'];
@@ -39,19 +46,24 @@ const detailFields = [...stopSides.flatMap(side => stopFields.map(field => side 
 
 let draft = emptyShipment();
 let draftId = '';
+let draftKey = '';
 let assistantDetails = {};
 const quickDrafts = new Map();
-const quickDraftKey = (mode, id) => id || mode;
 const assistantDescriptions = new Map();
+const dashboardAssistant = { mode: 'ltl', description: '' };
 let units = currentState().profile.units;
 const emptyCustomDraft = () => ({ shipment: { ...emptyShipment(), pickupDate: '', deliveryDate: '' }, details: {}, fields: {}, units: currentState().profile.units });
 let customDraft = emptyCustomDraft();
+let customDraftKey = 'new';
+const customDrafts = new Map();
 let toastTimer;
 let activeOrderId;
 let activeOrderTab = 'overview';
+let orderChangeDraft;
 let activeTicketId;
 let activeBillId;
 let activeAccountTab = 'profile';
+let walletRechargeDraft;
 const currentRoute = () => location.hash.slice(1).split('/');
 const navigate = destination => { location.hash = destination; };
 const findQuote = id => currentState().quotes.find(entry => entry.id === id);
@@ -78,8 +90,14 @@ function changeListPage(kind, page, size) {
   const filter = filters[kind];
   if (size) filter.size = size;
   filter.page = page;
+  if (kind === 'wallet') {
+    updateWalletFilter(currentState());
+    if (size) workspace.querySelector('[data-page-size="wallet"]').focus();
+    else workspace.querySelector('.wallet-table').focus({ preventScroll: true });
+    return;
+  }
   const route = Object.hasOwn(orderTypes, kind) ? orderRoute(kind)
-    : Object.hasOwn(caseTypes, kind) ? caseRoute(kind) : { bills: '#billing', rebills: '#billing/rebills' }[kind];
+    : Object.hasOwn(caseTypes, kind) ? caseRoute(kind) : { bills: '#billing', rebills: '#billing/rebills', customRecords: '#custom/records' }[kind];
   if (location.hash !== route) history.replaceState(null, '', route);
   render();
   if (size) workspace.querySelector('[data-page-size]').focus();
@@ -90,21 +108,14 @@ function changeListPage(kind, page, size) {
   }
 }
 
-function currentOrderList({ orders, customRequests = [] }) {
+function currentOrderList({ orders }) {
   const [, part, recordId] = currentRoute();
   const hasCategory = Object.hasOwn(orderTypes, part);
   const id = hasCategory ? recordId : part;
   const order = orders.find(entry => entry.id === id);
   const kind = order ? orderType(order) : hasCategory ? part : 'ltl';
   const records = orders.filter(entry => orderType(entry) === kind);
-  if (kind === 'custom') {
-    const bookedRequests = new Set(records.map(entry => entry.customRequestId));
-    records.push(...customRequests.filter(request => !bookedRequests.has(request.id)).map(request => ({
-      ...request,
-      shipment: request.shipment ?? { origin: request.origin ?? '', destination: request.destination ?? '' },
-      status: 'inquiry'
-    })));
-  }
+
   return { kind, records, requested: records.find(record => record.id === id), filter: filters[kind] };
 }
 
@@ -112,8 +123,9 @@ function orderFilterResults({ records, filter }) {
   const term = filter.query.trim().toLowerCase();
   const searched = records.filter(record => [
     record.id, record.reference, record.details?.originReference, record.details?.destinationReference,
-    record.shipment.origin, record.shipment.destination, record.requirements
-  ].some(field => field?.toLowerCase().includes(term)));
+    record.shipment.origin, record.shipment.destination, record.requirements, record.proNumber,
+    ...Object.values(record.shipment.stops ?? {}).flatMap(stops => stops.flatMap(stop => [stop.address, stop.reference, stop.contact]))
+  ].some(field => String(field ?? '').toLowerCase().includes(term)));
   return statusFilterResults(searched, filter.status);
 }
 
@@ -138,36 +150,43 @@ function currentBilling(orders) {
   const records = billingRecords(orders);
   const bills = records.filter(bill => Boolean(bill.originalId) === isRebill);
   const selected = bills.find(bill => isRebill ? bill.id === rebillId : bill.orderId === route);
-  return { type, records, bills, selected, filter: filters[type] };
+  return { type, records, bills, selected, filter: filters[type], ordersById: new Map(orders.map(order => [order.id, order])) };
 }
 
-function billFilterResults({ bills, filter }) {
+function billFilterResults(billing) {
+  const { bills, filter, ordersById } = billing;
   const term = filter.query.trim().toLowerCase();
-  const searched = bills.filter(bill => [bill.id, bill.orderId, bill.originalId, bill.reason].some(value => value?.toLowerCase().includes(term)));
-  return statusFilterResults(searched, filter.status);
+  const searched = bills.filter(bill => {
+    const shipment = ordersById.get(bill.orderId)?.shipment;
+    return [bill.id, bill.orderId, bill.originalId, bill.reason, billStatusText(bill), ...bill.charges.map(([label]) => label), shipment?.origin, shipment?.destination]
+      .some(value => value?.toLowerCase().includes(term));
+  });
+  billing.counts = { '': searched.length };
+  searched.forEach(bill => { const status = bill.workflowStatus ?? bill.paymentStatus; billing.counts[status] = (billing.counts[status] ?? 0) + 1; });
+  return filter.status ? searched.filter(bill => (bill.workflowStatus ?? bill.paymentStatus) === filter.status) : searched;
 }
 
 function renderBilling({ orders, tickets }) {
   const billing = currentBilling(orders);
-  let { matches, counts } = billFilterResults(billing);
+  let matches = billFilterResults(billing);
   if (billing.selected && !matches.includes(billing.selected)) {
     clearListFilters(billing.filter);
-    ({ matches, counts } = billFilterResults(billing));
+    matches = billFilterResults(billing);
   }
   const result = paginate(matches, billing.filter, billing.selected);
   const selected = billing.selected ?? result.rows[0];
   activeBillId = selected?.id;
-  return billingView(billing, result, selected, counts, latestCase(tickets, 'disputes', selected?.id));
+  return billingView(billing, result, selected, latestCase(tickets, 'disputes', selected?.id));
 }
 
 function updateBillFilter({ orders, tickets }) {
   const billing = currentBilling(orders);
   const { type, filter } = billing;
-  const { matches, counts } = billFilterResults(billing);
-  updateStatusFilters(filter, counts);
+  const matches = billFilterResults(billing);
+  updateStatusFilters(filter, billing.counts);
   const result = paginate(matches, filter);
   const selected = result.rows.find(bill => bill.id === activeBillId) ?? result.rows[0];
-  updateListRows(billRows(result.rows, selected?.id, type));
+  updateListRows(billRows(result.rows, selected?.id, billing));
   updatePagination(type, result);
   if (selected?.id === activeBillId) return;
   activeBillId = selected?.id;
@@ -179,6 +198,9 @@ function updateBillFilter({ orders, tickets }) {
   }
 }
 
+const orderOverviewTickets = (tickets, order) => tickets.filter(ticket => ticket.orderId === order?.id && (ticket.orderChange
+  || (caseKind(ticket) === 'disputes' && ticket.status !== 'closed' && ticket.customerActionRequired === true)));
+
 function renderOrders({ tickets }, listing) {
   const { kind, records, filter, requested } = listing;
   let { matches, counts } = orderFilterResults(listing);
@@ -189,7 +211,7 @@ function renderOrders({ tickets }, listing) {
   const result = paginate(matches, filter, requested);
   const selected = requested ?? result.rows[0];
   activeOrderId = selected?.id;
-  return ordersView(result, filter, selected, records.length, activeOrderTab, counts, latestCase(tickets, 'claims', selected?.id), kind);
+  return ordersView(result, filter, selected, records.length, activeOrderTab, counts, latestCase(tickets, 'claims', selected?.id), kind, orderOverviewTickets(tickets, selected));
 }
 
 function updateOrderFilter(state) {
@@ -204,14 +226,14 @@ function updateOrderFilter(state) {
   if (selected?.id === activeOrderId) return;
   activeOrderId = selected?.id;
   const detail = workspace.querySelector('.management-detail');
-  detail.innerHTML = orderDetail(selected, activeOrderTab, records.length, latestCase(state.tickets, 'claims', selected?.id), kind);
+  detail.innerHTML = orderDetail(selected, activeOrderTab, records.length, latestCase(state.tickets, 'claims', selected?.id), kind, orderOverviewTickets(state.tickets, selected));
   if (requested) history.replaceState(null, '', selected ? orderRecordHref(kind, selected) : orderRoute(kind));
 }
 
 function ticketFilterResults(tickets, kind) {
   const { query, status } = filters[kind];
   const term = query.trim().toLowerCase();
-  const searched = tickets.filter(ticket => [ticket.id, ticket.subject, ticket.orderId, ticket.billId, caseCategory(ticket)]
+  const searched = tickets.filter(ticket => [ticket.id, ticket.subject, ticket.orderId, ticket.billId, ticket.customRequestId, caseCategory(ticket)]
     .some(value => value?.toLowerCase().includes(term))).sort((a, b) => b.updatedAt - a.updatedAt);
   return statusFilterResults(searched, status);
 }
@@ -237,7 +259,7 @@ function renderTickets(state) {
   const result = paginate(matches, filters[kind], requested);
   const selected = requested ?? result.rows[0];
   activeTicketId = selected?.id;
-  return ticketsView(result, filters[kind], selected, linkedOrder(orders, selected), counts, ticketEmptyMessage(tickets, kind), kind, linkedBill(orders, selected));
+  return ticketsView(result, filters[kind], selected, linkedOrder(orders, selected), counts, ticketEmptyMessage(tickets, kind), kind, linkedBill(orders, selected), state.customRequests?.find(request => request.id === selected?.customRequestId));
 }
 
 function updateTicketFilter(state) {
@@ -253,20 +275,84 @@ function updateTicketFilter(state) {
   if (selected?.id === activeTicketId) return;
   activeTicketId = selected?.id;
   const detail = workspace.querySelector('.management-detail');
-  detail.innerHTML = ticketDetail(selected, linkedOrder(orders, selected), ticketEmptyMessage(tickets, kind), kind, linkedBill(orders, selected));
+  detail.innerHTML = ticketDetail(selected, linkedOrder(orders, selected), ticketEmptyMessage(tickets, kind), kind, linkedBill(orders, selected), state.customRequests?.find(request => request.id === selected?.customRequestId));
   if (id) history.replaceState(null, '', selected ? caseHref(selected) : caseRoute(kind));
+}
+
+function customRecordsResult(state) {
+  const requests = state.customRequests ?? [];
+  const filter = filters.customRecords;
+  const term = filter.query.trim().toLowerCase();
+  const searched = requests.filter(request => [request.id, request.contact, request.email, request.requirements, request.shipment?.origin, request.shipment?.destination,
+      ...Object.values(request.shipment?.stops ?? {}).flat().map(stop => stop.address)]
+      .some(value => value?.toLowerCase().includes(term))).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const matches = filter.status ? searched.filter(request => customRequestStatus(request, state.tickets) === filter.status) : searched;
+  return { ...paginate(matches, filter), requests: searched };
+}
+function updateCustomRecordFilters(state) {
+  const result = customRecordsResult(state);
+  const template = document.createElement('template');
+  template.innerHTML = customRecordsView(result, filters.customRecords, state.tickets);
+  workspace.querySelector('#listing-rows').innerHTML = template.content.querySelector('#listing-rows').innerHTML;
+  updatePagination('customRecords', result);
+  workspace.querySelectorAll('[data-action="list-status-filter"]').forEach(button => {
+    button.setAttribute('aria-pressed', filters.customRecords.status === button.dataset.status);
+    button.querySelector('.management-status-count').textContent = template.content.querySelector(`[data-status="${button.dataset.status}"] .management-status-count`).textContent;
+  });
+}
+
+function walletListing(state) {
+  const snapshot = walletSnapshot(state);
+  const filter = filters.wallet;
+  const term = filter.query.trim().toLowerCase();
+  const matches = snapshot.transactions.filter(entry => (!filter.status || entry.kind === filter.status)
+    && [entry.id, entry.billId, entry.orderId, entry.description, walletKinds[entry.kind]].some(value => value?.toLowerCase().includes(term)));
+  return { snapshot, matches, result: paginate(matches, filter) };
+}
+function walletParts(state) {
+  const { snapshot, result } = walletListing(state);
+  return { content: walletContent(snapshot, result, filters.wallet), pagination: paginationControls('wallet', result) };
+}
+function refreshWalletAccount() {
+  const panel = workspace.querySelector('#account-panel-balance');
+  if (!panel) return;
+  const parts = walletParts(currentState());
+  panel.innerHTML = parts.content;
+  const footer = workspace.querySelector('.list-pagination');
+  if (footer) footer.outerHTML = parts.pagination;
+  else workspace.insertAdjacentHTML('beforeend', parts.pagination);
+}
+function updateWalletFilter(state) {
+  const { result } = walletListing(state);
+  workspace.querySelector('#listing-rows').innerHTML = walletRows(result.rows);
+  updatePagination('wallet', result);
+  workspace.querySelector('.wallet-table').scrollTop = 0;
 }
 
 function updateListFilters(kind) {
   const state = currentState();
   if (Object.hasOwn(orderTypes, kind)) updateOrderFilter(state);
   else if (Object.hasOwn(caseTypes, kind)) updateTicketFilter(state);
+  else if (kind === 'customRecords') updateCustomRecordFilters(state);
+  else if (kind === 'wallet') updateWalletFilter(state);
   else updateBillFilter(state);
 }
 
 function updateListRows(rows) {
   workspace.querySelector('#listing-rows').innerHTML = rows;
   workspace.querySelector('.management-list .table-wrap').scrollTop = 0;
+}
+
+function revealSelectedRow(tableWrap) {
+  const row = tableWrap.querySelector('.table-row-selected');
+  if (!row) return;
+  const viewport = tableWrap.getBoundingClientRect();
+  const headerBottom = tableWrap.querySelector('th').getBoundingClientRect().bottom;
+  const rowBounds = row.getBoundingClientRect();
+  if (rowBounds.top < headerBottom) tableWrap.scrollTop += rowBounds.top - headerBottom;
+  else if (rowBounds.bottom > viewport.top + tableWrap.clientHeight) {
+    tableWrap.scrollTop += rowBounds.bottom - viewport.top - tableWrap.clientHeight;
+  }
 }
 
 function openTicket(ticket) {
@@ -276,7 +362,7 @@ function openTicket(ticket) {
 }
 
 function caseRecords(state, kind) {
-  return kind === 'disputes' ? billingRecords(state.orders).filter(bill => bill.issued) : state.orders.filter(order => order.status !== 'ready');
+  return kind === 'disputes' ? billingRecords(state.orders) : state.orders.filter(canClaimOrder);
 }
 
 async function saveCaseChanges(form, commit, error, after) {
@@ -337,47 +423,77 @@ function render(moveFocus = false, message = '') {
   const previousList = workspace.querySelector('.management-tools')?.dataset.filters;
   const previousListScroll = workspace.querySelector('.management-list .table-wrap')?.scrollTop ?? 0;
   const previousScroll = workspace.scrollTop;
-  const categoryHadFocus = document.activeElement?.matches('.management-tabs a:focus-visible');
+  const categoryHadFocus = document.activeElement?.matches('.management-tabs a:focus-visible, .custom-top-tabs a:focus-visible');
   const state = currentState();
   let [section, id] = currentRoute();
   if (!section) section = 'dashboard';
+  if (section === 'account' && Object.hasOwn(accountTabs, id)) activeAccountTab = id;
   const quote = state.quotes.find(quote => quote.id === id);
   const booked = state.orders.find(order => order.quoteId === id);
   const orderListing = section === 'orders' ? currentOrderList(state) : null;
   const mode = quote ? shipmentMode(quote.shipment) : section === 'ftl' ? 'ftl' : 'ltl';
   const customRequests = state.customRequests ?? [];
+  const customEditing = section === 'custom' && id === 'change' ? customRequests.find(request => request.id === currentRoute()[2]) : undefined;
+  const customRequest = customEditing ?? customRequests.find(request => request.id === id);
+  if (section === 'orders' && id === 'custom' && customRequests.some(request => request.id === currentRoute()[2])) { navigate('custom/' + currentRoute()[2]); return; }
+  if (section === 'custom' && id && !['change', 'records'].includes(id) && !customRequest) { navigate('custom/records'); return; }
+  if (section === 'custom' && id === 'change' && (!customEditing || customEditing.orderId || customChangeTicket(customEditing, state.tickets))) {
+    navigate(customEditing ? 'custom/' + customEditing.id : 'custom/records'); return;
+  }
+  if (section === 'custom' && (id === 'change' || !id)) {
+    const key = customEditing?.id ?? 'new';
+    if (key !== customDraftKey) {
+      customDraftKey = key;
+      customDraft = customDrafts.get(key) ?? (customEditing ? { shipment: structuredClone(customEditing.shipment ?? { ...emptyShipment(), origin: customEditing.origin ?? '', destination: customEditing.destination ?? '' }), details: structuredClone(customEditing.details ?? {}),
+        fields: Object.fromEntries(['contact', 'email', 'phone', 'requirements'].map(name => [name, customEditing[name]])), units: customEditing.units ?? state.profile.units, revision: customEditing.revision ?? 1, reason: '' } : emptyCustomDraft());
+      if (customEditing) customDraft.shipment = customCargoIdentities(customDraft.shipment);
+    }
+  }
 
   if (section === 'book') section = 'rates';
   if (section === 'ftl') section = 'quote';
   if (!Object.hasOwn(labels, section) || (['rates', 'details'].includes(section) && !quote)) section = 'quote';
   if (section === 'details' && (!quote.selectedRateId || booked)) section = 'rates';
-  if (section === 'quote' && (!workspace.querySelector('#quote-form') || draftId !== (quote?.id ?? '') || shipmentMode(draft) !== mode)) {
-    const saved = quickDrafts.get(quickDraftKey(mode, quote?.id));
-    draft = structuredClone(saved?.shipment ?? quote?.shipment ?? emptyShipment(mode));
-    assistantDetails = saved?.details ?? {};
-    draftId = quote?.id ?? '';
+  if (section === 'quote') {
+    const key = id === 'ai' ? mode + '/ai' : quote?.id ?? mode;
+    if (!workspace.querySelector('#quote-form') || draftKey !== key) {
+      const saved = quickDrafts.get(key);
+      draft = structuredClone(saved?.shipment ?? quote?.shipment ?? emptyShipment(mode));
+      assistantDetails = saved?.details ?? {};
+      draftId = quote?.id ?? '';
+      draftKey = key;
+    }
   }
   const navigationSection = ['quote', 'rates', 'details'].includes(section) ? quoteEntry({ mode }) : section;
   const header = workflowHeader(section, quote, booked, mode);
   document.body.classList.toggle('workflow-active', Boolean(header));
+  document.body.classList.toggle('custom-inquiry-active', section === 'custom');
+  customInquiryNav.hidden = section !== 'custom';
+  customInquiryNav.innerHTML = section === 'custom' ? customInquiryNavigation(id ? 'records' : 'new') : '';
   if (header) breadcrumb.innerHTML = header.path;
   else breadcrumb.textContent = labels[section];
-  toolbarAction.innerHTML = header?.action ?? '';
-  toolbarAction.hidden = !header?.action;
+  const toolbarContent = section === 'custom' && !id
+    ? '<button type="button" class="btn small" data-action="fill-custom-example" aria-label="填入两提两卸示例"><span class="custom-example-full">填入两提两卸示例</span><span class="custom-example-short" aria-hidden="true">填入示例</span></button>'
+    : header?.action ?? '';
+  toolbarAction.innerHTML = toolbarContent;
+  toolbarAction.hidden = !toolbarContent;
   renderSidebar(state, navigationSection);
 
   const screens = {
-    dashboard: () => dashboardView(state),
+    dashboard: () => dashboardView(state, dashboardAssistant),
     quote: () => quoteView(draft, units, Object.values(assistantDetails).some(Boolean)),
     rates: () => ratesView(quote, booked, message, units, rateFiltersByQuote.get(quote.id) ?? {}),
     details: () => detailsView(quote, state.addresses, units),
-    custom: () => customQuoteView(state.profile, customRequests, customRequests.find(request => request.id === id), state.addresses, customDraft),
+    custom: () => id === 'records' ? customRecordsView(customRecordsResult(state), filters.customRecords, state.tickets) : customQuoteView(state.profile, customRequests, customRequest, state.addresses, customDraft, state.tickets, customEditing),
     orders: () => renderOrders(state, orderListing),
     tickets: () => renderTickets(state),
     billing: () => renderBilling(state),
-    account: () => accountView(state.profile, state.addresses, state.apiKeys ?? [], activeAccountTab)
+    account: () => accountView(state.profile, state.addresses, state.apiKeys ?? [], activeAccountTab, activeAccountTab === 'balance' ? walletParts(state) : {})
   };
   workspace.innerHTML = screens[section]();
+  initializePhoneInputs(workspace);
+  const customEditor = workspace.querySelector('#custom-quote-form[data-request]');
+  if (customEditor) markCustomChanges(customEditor);
   workspace.querySelectorAll('[data-quick-address]').forEach(input => bindAddressSuggestions(input, state.addresses));
   const routeMap = workspace.querySelector('[data-route-map]');
   if (routeMap) renderRouteMap(routeMap);
@@ -385,16 +501,21 @@ function render(moveFocus = false, message = '') {
   const listOnly = (section === 'orders' && !orderListing.requested) || (section === 'tickets' && !currentCaseRoute().id)
     || (section === 'billing' && !currentBilling(state.orders).selected);
   const detail = listOnly ? null : workspace.querySelector('#detail-title');
-  const categoryTab = categoryHadFocus ? workspace.querySelector('.management-tabs [aria-current]') : null;
+  const categoryTab = categoryHadFocus ? (section === 'custom' ? customInquiryNav : workspace).querySelector('[aria-current="page"]') : null;
   const target = detail ?? categoryTab ?? workspace.querySelector('h1');
-  target.focus({ preventScroll: true });
-  if (detail && innerWidth <= 1080) detail.closest('.detail').scrollIntoView();
+  target?.focus({ preventScroll: true });
+  if (detail && workspaceScrolls()) detail.closest('.detail').scrollIntoView();
   else {
     const nextList = workspace.querySelector('.management-tools')?.dataset.filters;
     const sameList = detail && previousList && previousList === nextList;
     workspace.scrollTop = sameList ? previousScroll : 0;
-    if (sameList) workspace.querySelector('.management-list .table-wrap').scrollTop = previousListScroll;
+    if (detail) {
+      const tableWrap = workspace.querySelector('.management-list .table-wrap');
+      if (sameList) tableWrap.scrollTop = previousListScroll;
+      revealSelectedRow(tableWrap);
+    }
   }
+  return detail?.closest('.management-workspace');
 }
 
 function hideServiceHelp() {
@@ -428,7 +549,7 @@ function readStops(fields) {
   };
 }
 
-function readCargo(form, previousItems, displayUnits = units) {
+function readCargo(form, previousItems, displayUnits = units, legacyDescription = '') {
   const { weightFactor, lengthFactor } = unitSettings[displayUnits];
   return Array.from(form.querySelectorAll('[data-cargo-row]'), (row, index) => {
     const previous = previousItems[index] ?? emptyItem();
@@ -441,16 +562,27 @@ function readCargo(form, previousItems, displayUnits = units) {
     };
     const commodities = Array.from(row.querySelectorAll('[data-commodity]'), entry => {
       const value = name => entry.querySelector('[name="' + name + '"]').value.trim();
-      const hazmat = Object.fromEntries(Array.from(entry.querySelectorAll('[data-hazmat] [name]'), input => [input.name, input.value.trim()]));
+      const hazmat = Object.fromEntries(Array.from(entry.querySelectorAll('[data-hazmat] [name]'), input => {
+        const value = input.matches('[data-phone-number]') ? phoneInputValue(input) : input.value.trim();
+        return [input.name, value];
+      }));
       return {
-        description: value('commodity'), nmfc: value('nmfc'), freightClass: value('freightClass'),
+        ...(entry.dataset.customId ? { customId: entry.dataset.customId } : {}),
+        description: value('commodity'), declaredValue: value('declaredValue'), nmfc: value('nmfc'), freightClass: value('freightClass'),
         regulated: Array.from(entry.querySelectorAll('[name="regulated"]:checked'), input => input.value),
         pieceType: value('pieceType'), pieceCount: value('pieceCount'),
         ...(Object.values(hazmat).some(Boolean) ? { hazmat } : {})
       };
     });
+    const quickClass = row.querySelector('[data-quick-freight-class] select');
+    if (quickClass && (quickClass.value || previous.commodities?.length)) {
+      const [first = emptyCommodity(), ...other] = itemCommodities(previous, index === 0 ? legacyDescription : '');
+      commodities.push({ ...first, freightClass: quickClass.value }, ...other);
+    }
+    const route = Object.fromEntries(Array.from(row.querySelectorAll('[data-cargo-route] select'), input => [input.name, input.value]));
     return {
       ...previous,
+      ...route,
       type: read('type'), quantity: read('quantity') === '' ? '' : Number(read('quantity')),
       weight: measurement('weight', weightFactor), length: measurement('length', lengthFactor),
       width: measurement('width', lengthFactor), height: measurement('height', lengthFactor),
@@ -461,18 +593,122 @@ function readCargo(form, previousItems, displayUnits = units) {
 
 function readCustomDraft(form) {
   const fields = new FormData(form);
-  const value = name => fields.get(name).trim();
+  const value = name => String(fields.get(name) ?? '').trim();
   const { shipment, units } = customDraft;
+  const previousStops = customShipmentStops(shipment, customDraft.details);
+  const stops = Object.fromEntries(stopSides.map(side => [side, Array.from(form.querySelectorAll(`[data-custom-stop][data-side="${side}"]`), element => {
+    const key = element.dataset.customStop;
+    const id = element.dataset.stopId;
+    return {
+      ...previousStops[side].find(stop => stop.id === id), id,
+      address: value(key), addressType: value(key + '-type'), date: value(key + 'Date'),
+      contact: value(key + 'Contact'), phone: value(key + 'Phone'), phoneExtension: value(key + 'PhoneExtension'),
+      reference: value(key + 'Reference'), notes: value(key + 'Notes'), services: fields.getAll(key + '-services')
+    };
+  })]));
+  const origin = stops.origin[0];
+  const destination = stops.destination.at(-1);
+  const services = Object.fromEntries(stopSides.map(side => [side, [...new Set(stops[side].flatMap(stop => stop.services))]]));
+  const endpoints = { origin, destination };
   return {
+    revision: customDraft.revision, reason: value('changeReason'),
     shipment: {
-      ...shipment, ...readStops(fields),
-      pickupDate: value('pickupDate'), deliveryDate: value('deliveryDate'),
+      ...shipment, stops, origin: origin.address, destination: destination.address,
+      addressTypes: { origin: origin.addressType, destination: destination.addressType }, services,
+      pickupDate: origin.date, deliveryDate: destination.date,
       items: readCargo(form, shipment.items, units)
     },
-    details: Object.fromEntries(stopSides.flatMap(side => ['Contact', 'Phone'].map(field => [side + field, value(side + field)]))),
+    details: Object.fromEntries(stopSides.flatMap(side => Object.entries({
+      Contact: endpoints[side].contact, Phone: endpoints[side].phone, PhoneExtension: endpoints[side].phoneExtension,
+      Reference: endpoints[side].reference, Notes: endpoints[side].notes
+    }).map(([field, content]) => [side + field, content]))),
     fields: Object.fromEntries(['contact', 'email', 'phone', 'requirements'].map(name => [name, value(name)])),
     units
   };
+}
+
+function markCustomChanges(form) {
+  const request = currentState().customRequests?.find(entry => entry.id === form.dataset.request);
+  if (!request) return;
+  const { shipment, fields, details, units } = customDraft;
+  const change = { before: request, after: { ...fields, shipment, details, units } };
+  const changes = customRequestChanges(change);
+  form.querySelectorAll('.custom-field-changed, .custom-entity-added, .custom-change-heading').forEach(element => {
+    element.classList.remove('custom-field-changed', 'custom-entity-added', 'custom-change-heading');
+    if (element.hasAttribute('data-change-tooltip')) { element.removeAttribute('title'); delete element.dataset.changeTooltip; }
+  });
+  form.querySelectorAll('.custom-field-original').forEach(element => element.remove());
+  const marker = (element, row) => {
+    if (!element) return;
+    if (row.kind === 'added') { element.classList.add('custom-entity-added'); return; }
+    const field = element.closest('.field, .cargo-declaration');
+    if (!field) return;
+    field.classList.add('custom-field-changed');
+    field.dataset.changeTooltip = 'true';
+    field.title = '修改前：' + (row.before || '未填写');
+    const description = document.createElement('span');
+    description.className = 'sr-only custom-field-original';
+    description.textContent = ' 已修改，修改前：' + (row.before || '未填写');
+    field.append(description);
+  };
+  const inputIn = (scope, name) => Array.from(scope?.querySelectorAll('[name]') ?? []).find(input => input.name === name);
+  for (const row of changes) {
+    if (row.kind === 'removed') continue;
+    const target = row.target;
+    if (target.scope === 'request') marker(inputIn(form, target.name), row);
+    if (target.scope === 'route') form.querySelector(`#custom-${target.side}-title`)?.classList.add('custom-change-heading');
+    if (target.scope === 'stop') {
+      const stop = Array.from(form.querySelectorAll('[data-custom-stop]')).find(element => element.dataset.stopId === target.id);
+      if (row.kind === 'added') marker(stop, row);
+      else {
+        const suffix = { address: '', addressType: '-type', date: 'Date', contact: 'Contact', phone: 'Phone', phoneExtension: 'PhoneExtension', reference: 'Reference', notes: 'Notes', services: '-services' }[target.name];
+        if (suffix !== undefined) {
+          if (target.name === 'services') {
+            const disclosure = stop?.querySelector('.stop-service-disclosure');
+            if (disclosure) { disclosure.classList.add('custom-change-heading'); disclosure.title = '修改前：' + (row.before || '无'); disclosure.dataset.changeTooltip = 'true'; }
+            const choice = inputIn(stop, stop?.dataset.customStop + suffix);
+            marker(choice, row);
+          } else marker(inputIn(stop, stop?.dataset.customStop + suffix), row);
+        }
+      }
+    }
+    if (target.scope === 'cargo' || target.scope === 'commodity') {
+      const cargo = Array.from(form.querySelectorAll('[data-cargo-row]')).find(element => element.dataset.customId === (target.itemId ?? target.id));
+      const scope = target.scope === 'commodity' ? Array.from(cargo?.querySelectorAll('[data-commodity]') ?? []).find(element => element.dataset.customId === target.id) : cargo;
+      marker(row.kind === 'added' ? scope : inputIn(scope, target.name), row);
+    }
+  }
+  const count = document.querySelector('#custom-change-count');
+  if (count) count.textContent = changes.length ? ' · 已修改 ' + changes.length + ' 项' : '';
+  const summary = form.querySelector('#custom-live-changes');
+  if (summary) summary.innerHTML = customChangeComparison(change, '核对本次变更');
+}
+
+function updateCustomShipment(form) {
+  customDraft = readCustomDraft(form);
+  const { shipment, units } = customDraft;
+  const stops = shipment.stops;
+  workspace.querySelector('#custom-route-preview').innerHTML = customRouteSummary(stops, shipment, units);
+  updateCargoMetrics(shipment, units, form);
+  form.querySelectorAll('[data-custom-stop]').forEach(element => {
+    const { side, stopId } = element.dataset;
+    const stop = stops[side].find(stop => stop.id === stopId);
+    const label = side === 'origin' ? '提货' : '送货';
+    element.querySelector('.stop-heading').textContent = stop.address ? shortAddress(stop.address) : `${label}点 ${stops[side].indexOf(stop) + 1}`;
+    element.querySelector('[data-stop-cargo]').innerHTML = customStopCargo(shipment, side, stop, units);
+  });
+  markCustomChanges(form);
+  form.querySelectorAll('[data-cargo-row]').forEach((row, index) => {
+    const route = customCargoRoute(shipment.items[index], stops);
+    row.querySelector('[data-cargo-route-error]').hidden = Boolean(route.originStopId && route.destinationStopId);
+    for (const side of stopSides) {
+      const select = row.querySelector(`[name="${side}StopId"]`);
+      for (const option of select.options) {
+        const stopIndex = stops[side].findIndex(stop => stop.id === option.value);
+        if (stopIndex >= 0) option.textContent = customStopLabel(stops[side][stopIndex], side, stopIndex);
+      }
+    }
+  });
 }
 
 function readShipment() {
@@ -480,11 +716,12 @@ function readShipment() {
   if (!form) return draft;
   const fields = new FormData(form);
   const ftl = shipmentMode(draft) === 'ftl' ? { equipment: fields.get('equipment'), vehicleCount: Number(fields.get('vehicleCount')) } : {};
-  return { ...draft, ...readStops(fields), ...ftl, pickupDate: fields.get('pickupDate'), items: readCargo(form, draft.items) };
+  const legacyDescription = draftId ? findQuote(draftId)?.details?.commodity : '';
+  const items = readCargo(form, draft.items, units, legacyDescription);
+  return { ...draft, ...readStops(fields), ...ftl, pickupDate: fields.get('pickupDate'), items };
 }
 
-function analyzeAssistant(form) {
-  const shipment = readShipment();
+function analyzeAssistant(form, shipment = readShipment()) {
   const result = analyzeQuoteText(form.elements.description.value, { mode: shipmentMode(shipment), addresses: currentState().addresses });
   return { result, shipment: applyQuoteText(shipment, result) };
 }
@@ -508,21 +745,67 @@ function showDialog(title, content, mode = '') {
   dialog.dataset.mode = mode;
   dialog.classList.toggle('wide-dialog', Boolean(mode));
   dialog.innerHTML = `<header class="panel-head ruled"><h2 id="dialog-title" class="panel-title" tabindex="-1">${title}</h2><button class="icon-button" type="button" data-action="close-dialog" aria-label="关闭弹窗">${icon('close')}</button></header><div class="detail-body">${content}</div>`;
+  initializePhoneInputs(dialog);
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;
   dialog.querySelector('#dialog-title').focus();
 }
 
+function showOrderChangeEditor() {
+  const { order, side, values, cargo } = orderChangeDraft;
+  showDialog('修改订单', orderChangeEditor(order, side, values, cargo), 'order-change');
+}
+
+const orderChangeCargoForm = () => dialog.open && dialog.querySelector('#order-change-cargo:not([hidden])');
+const cargoScope = () => orderChangeCargoForm() || workspace;
+
+function readOrderChangeCargo(form) {
+  const { order, cargo } = orderChangeDraft;
+  return readCargo(form, cargo.items, cargo.units, order.details?.commodity);
+}
+
+function reviewOrderChange(form) {
+  const { order, cargo } = orderChangeDraft;
+  const side = form.dataset.orderChangeForm;
+  cargo.items = readOrderChangeCargo(dialog.querySelector('#order-change-cargo'));
+  const plan = side === 'cargo' ? planOrderCargoChange(order, cargo.items) : planOrderChange(order, side, textFields(form));
+  if (plan.error) {
+    form.querySelector('[data-order-change-error]').textContent = plan.error;
+    return;
+  }
+  const stopForms = dialog.querySelectorAll('[data-order-change-form]:not(#order-change-cargo)');
+  orderChangeDraft.values = Object.fromEntries([...stopForms].map(node => [node.dataset.orderChangeForm, textFields(node)]));
+  orderChangeDraft.plan = plan;
+  orderChangeDraft.side = side;
+  showDialog('核对订单变更', orderChangeReview(order, plan), 'order-change');
+}
+
+function sendOrderChange(orderId, plan) {
+  const { ticket, error } = plan.error ? plan : submitOrderChange(orderId, plan);
+  if (error) {
+    dialog.querySelector('[data-order-change-error]').textContent = error;
+    return;
+  }
+  dialog.close();
+  activeOrderTab = 'overview';
+  render();
+  workspace.querySelector(`.order-change-record a[href="${caseHref(ticket)}"]`)?.focus();
+  notify(plan.side === 'cancel' ? '取消申请已提交审核' : '变更申请已提交审核');
+}
+
 function downloadBill(bill) {
-  if (!bill?.issued) return;
+  if (!bill) return;
   const amount = cents => (cents / 100).toFixed(2);
-  const data = [
-    ['账单号', '关联运单', '出账日期', '币种', '状态', ...bill.charges.map(([label]) => label), '合计',
-      ...(bill.originalId ? ['原账单号', '补收原因'] : [])],
-    [bill.id, bill.orderId, bill.issued, 'USD', billStatuses[bill.status], ...bill.charges.map(([, cents]) => amount(cents)), amount(bill.total),
-      ...(bill.originalId ? [bill.originalId, bill.reason] : [])]
+  const data = bill.originalId ? [
+    ['账单号', '关联运单', '出账日期', '申诉截止时间（PT）', '剩余申诉工作日', '实际扣款日期', '扣款方式', '币种', '状态', ...bill.charges.map(([label]) => label), '应付金额', '已扣款金额', '原账单号', '补收原因'],
+    [bill.id, bill.orderId, bill.issuedOn, bill.appealDeadline ? bill.appealDeadline + ' 00:00' : '', bill.appealDaysRemaining, bill.collectedOn,
+      rebillMethodText(bill),
+      'USD', billStatusText(bill), ...bill.charges.map(([, cents]) => amount(cents)), amount(bill.total), amount(bill.paymentStatus === 'collected' ? bill.total : 0), bill.originalId, bill.reason]
+  ] : [
+    ['账单号', '关联运单', '扣款日期', '币种', '状态', ...bill.charges.map(([label]) => label), billAmountLabel(bill)],
+    [bill.id, bill.orderId, bill.chargedOn, 'USD', billStatusText(bill), ...bill.charges.map(([, cents]) => amount(cents)), amount(bill.total)]
   ];
-  const csv = data.map(row => row.map(value => '"' + String(value).replaceAll('"', '""') + '"').join(',')).join('\r\n');
+  const csv = data.map(row => row.map(value => '"' + String(value ?? '').replaceAll('"', '""') + '"').join(',')).join('\r\n');
   const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -533,7 +816,7 @@ function downloadBill(bill) {
 }
 
 function focusCargo(index) {
-  workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[name="quantity"]')?.focus();
+  cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[name="quantity"]')?.focus();
 }
 
 function saveDetails(form = workspace.querySelector('#details-form'), editItems) {
@@ -553,13 +836,26 @@ function saveDetails(form = workspace.querySelector('#details-form'), editItems)
 }
 
 function editCargo(editItems, nextUnits) {
+  const changeForm = orderChangeCargoForm();
+  if (changeForm) {
+    const { order, cargo } = orderChangeDraft;
+    cargo.items = readOrderChangeCargo(changeForm);
+    editItems?.(cargo.items);
+    cargo.units = nextUnits ?? cargo.units;
+    changeForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ ...order, shipment: { ...order.shipment, items: cargo.items } }, cargo.units);
+    initializePhoneInputs(changeForm);
+    return cargo.items;
+  }
   const customForm = workspace.querySelector('#custom-quote-form');
   if (customForm) {
     customDraft = readCustomDraft(customForm);
     const { shipment } = customDraft;
     editItems?.(shipment.items);
+    Object.assign(shipment, customCargoIdentities(shipment, false));
     customDraft.units = nextUnits ?? customDraft.units;
-    customForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ shipment }, customDraft.units);
+    customForm.querySelector('#cargo-editor').outerHTML = cargoEditor({ shipment }, customDraft.units, shipment.stops);
+    initializePhoneInputs(customForm);
+    updateCustomShipment(customForm);
     return shipment.items;
   }
   const form = workspace.querySelector('#details-form');
@@ -568,6 +864,7 @@ function editCargo(editItems, nextUnits) {
     if (!quote) return [];
     units = nextUnits ?? units;
     form.querySelector('#cargo-editor').outerHTML = cargoEditor(quote, units);
+    initializePhoneInputs(form);
     updateSummary(quote);
     return quote.shipment.items;
   }
@@ -578,9 +875,9 @@ function editCargo(editItems, nextUnits) {
   return draft.items;
 }
 
-function updateCargoMetrics(shipment, displayUnits = units) {
-  workspace.querySelector('#cargo-total').textContent = cargoTotalsText(shipment, displayUnits);
-  workspace.querySelectorAll('[data-cargo-metrics]').forEach((entry, index) => {
+function updateCargoMetrics(shipment, displayUnits = units, scope = workspace) {
+  scope.querySelector('#cargo-total').textContent = cargoTotalsText(shipment, displayUnits);
+  scope.querySelectorAll('[data-cargo-metrics]').forEach((entry, index) => {
     entry.textContent = cargoItemMetrics(shipment.items[index], displayUnits);
   });
 }
@@ -649,6 +946,106 @@ function updateRates(id) {
 }
 
 const actions = {
+  'custom-support'({ id }) {
+    const state = currentState();
+    const request = state.customRequests?.find(entry => entry.id === id);
+    if (!request || request.orderId) return;
+    const pending = customChangeTicket(request, state.tickets);
+    showDialog('模拟客服处理', `<p class="note">演示操作：模拟客服审核资料并返回报价。</p>
+      ${pending ? `<p>申请工单 ${e(pending.id)}</p>${customChangeComparison(pending.customChange)}<details class="custom-change-review"><summary>核对本次修改资料</summary>${customRequestSnapshot(pending.customChange.after)}</details>` : '<p>按当前运输需求生成一份演示报价，有效期 24 小时。</p>'}
+      <div class="actions end">${pending ? `<button class="btn small" type="button" data-action="custom-response" data-id="${e(id)}" data-decision="reject" data-ticket="${e(pending?.id ?? '')}" data-revision="${request.revision ?? 1}">模拟审核不通过</button>` : ''}<button class="btn primary small" type="button" data-action="custom-response" data-id="${e(id)}" data-decision="approve" data-ticket="${e(pending?.id ?? '')}" data-revision="${request.revision ?? 1}">${pending ? '模拟审核通过并返回报价' : '返回演示报价'}</button></div>`, 'review');
+  },
+  'custom-response'({ id, decision, ticket, revision }) {
+    const result = simulateCustomResponse(id, decision, ticket, revision);
+    if (result.error) { notify(result.error); return; }
+    dialog.close(); render(); notify(decision === 'reject' ? '修改申请未通过，原资料已保留' : '资料已核对，演示报价已返回');
+  },
+  'custom-book'({ id }) {
+    const state = currentState();
+    const request = state.customRequests?.find(entry => entry.id === id);
+    if (!request || customRequestStatus(request, state.tickets) !== 'quoted') { notify('请等待审核完成并获取有效报价'); return; }
+    const quote = request.quote;
+    showDialog('确认定制运输订单', `<div class="stack"><p><strong>${e(id)}</strong> · 资料版本 V${quote.revision}</p><p>${e(shortAddress(request.shipment.origin))} → ${e(shortAddress(request.shipment.destination))}</p><p>报价 ${e(quote.id)} · 有效至 ${new Date(quote.expiresAt).toLocaleString('zh-CN', { hour12: false })}</p>${customRouteSummary(customShipmentStops(request.shipment, request.details), request.shipment, request.units)}<details class="custom-change-review"><summary>核对完整提送货与货物资料</summary>${customRequestSnapshot(request)}</details><p>下单扣款金额 <strong>${money(quote.total)} USD</strong></p><p class="note">演示下单与扣款。确认后生成运单，并进入订单管理。</p><p class="error" id="custom-book-error" role="alert"></p><div class="actions end"><button class="btn small" type="button" data-action="close-dialog">返回核对</button><button class="btn primary small" type="button" data-action="confirm-custom-book" data-id="${e(id)}" data-quote="${e(quote.id)}">确认下单并扣款</button></div></div>`);
+  },
+  'confirm-custom-book'({ id, quote }) {
+    const result = bookCustomRequest(id, quote);
+    if (result.error) { dialog.querySelector('#custom-book-error').textContent = result.error; return; }
+    dialog.close(); navigate('orders/custom/' + result.order.id); notify('下单成功，已模拟扣款');
+  },
+
+  'fill-custom-example'() {
+    const { profile } = currentState();
+    customDraft = {
+      ...emptyCustomDraft(), shipment: exampleCustomShipment(),
+      fields: {
+        contact: profile.contact, email: profile.email, phone: profile.phone,
+        requirements: '两提两卸示例：先从洛杉矶、凤凰城提货，再依次送至芝加哥、印第安纳波利斯。货物 1 共 10 托盘，从 A1 整批送至 B1；货物 2 共 3 托盘，从 A2 整批送至 B2。请按各地点的预约、到货通知及尾板要求安排运输。'
+      }
+    };
+    render();
+    workspace.scrollTop = 0;
+    toolbarAction.querySelector('[data-action="fill-custom-example"]').focus({ preventScroll: true });
+    notify('已填入两提两卸示例，可修改后提交');
+  },
+  'custom-stop'({ side, index, operation }) {
+    const form = workspace.querySelector('#custom-quote-form');
+    if (!form || !stopSides.includes(side)) return;
+    customDraft = readCustomDraft(form);
+    const groups = customDraft.shipment.stops;
+    const stops = groups[side];
+    let nextIndex = Number(index);
+    let affectedCargo = false;
+    if (operation === 'add') {
+      stops.push(emptyCustomStop());
+      nextIndex = stops.length - 1;
+    } else if (operation === 'remove' && stops.length > 1) {
+      const [removed] = stops.splice(nextIndex, 1);
+      for (const item of customDraft.shipment.items) {
+        if (item[side + 'StopId'] !== removed.id) continue;
+        item[side + 'StopId'] = '';
+        affectedCargo = true;
+      }
+      nextIndex = Math.min(nextIndex, stops.length - 1);
+    } else if (operation === 'up' && nextIndex > 0) {
+      [stops[nextIndex - 1], stops[nextIndex]] = [stops[nextIndex], stops[nextIndex - 1]];
+      nextIndex--;
+    } else if (operation === 'down' && nextIndex < stops.length - 1) {
+      [stops[nextIndex], stops[nextIndex + 1]] = [stops[nextIndex + 1], stops[nextIndex]];
+      nextIndex++;
+    } else return;
+    render();
+    const target = document.getElementById('custom-' + stops[nextIndex].id);
+    target?.focus({ preventScroll: true });
+    target.closest('[data-custom-stop]').scrollIntoView({ block: 'nearest' });
+    if (affectedCargo) notify('地点已移除，请为关联货物重新选择' + (side === 'origin' ? '提货点' : '送货点'));
+  },
+  'dashboard-quote-example'(_, button) {
+    const form = button.form;
+    const cargo = form.elements.mode.value === 'ftl'
+      ? '用 1 辆 53ft 干柜车，20 个托盘'
+      : '2 个托盘';
+    const input = form.elements.description;
+    input.value = '明天从 90001（商业地址有卸货平台）送到 60601（商业地址无卸货平台）。\n'
+      + cargo + '，每托盘 400 lb，48 × 40 × 48 in。';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  },
+  'dashboard-quote'({ next }, button) {
+    const form = workspace.querySelector('#dashboard-quote-form');
+    if (!form || form.dataset.submitted) return;
+    const mode = form.elements.mode.value;
+    const { result, shipment } = analyzeAssistant(form, emptyShipment(mode));
+    units = currentState().profile.units;
+    form.dataset.submitted = 'true';
+    button.disabled = true;
+    if (next === 'rates' && pricingReady(shipment)) {
+      const quote = saveQuote(shipment, '', result.details);
+      navigate('rates/' + quote.id);
+      return;
+    }
+    quickDrafts.set(mode + '/ai', { shipment, details: result.details });
+    navigate(quoteEntry(shipment) + '/ai');
+  },
   'open-assistant'() {
     const description = assistantDescriptions.get(location.hash) ?? '';
     showDialog('AI 快速填单', quoteAssistantForm(shipmentMode(draft), description), 'assistant');
@@ -687,16 +1084,16 @@ const actions = {
   },
   'add-commodity'({ index }) {
     editCargo(items => items[index].commodities.push(emptyCommodity()));
-    workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-commodity]:last-of-type [name="commodity"]')?.focus();
+    cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-commodity]:last-of-type [name="commodity"]')?.focus();
   },
   'remove-commodity'({ index, commodityIndex }) {
     editCargo(items => items[index].commodities.splice(Number(commodityIndex), 1));
-    workspace.querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-action="add-commodity"]')?.focus();
+    cargoScope().querySelectorAll('[data-cargo-row]')[index]?.querySelector('[data-action="add-commodity"]')?.focus();
   },
-  units({ units: selection }) {
-    if (workspace.querySelector(`[data-units="${selection}"]`).getAttribute('aria-pressed') === 'true') return;
+  units({ units: selection }, button) {
+    if (button.getAttribute('aria-pressed') === 'true') return;
     editCargo(undefined, selection);
-    workspace.querySelector(`[data-units="${selection}"]`).focus();
+    cargoScope().querySelector(`[data-units="${selection}"]`)?.focus();
   },
   'fill-details-example'() {
     const form = workspace.querySelector('#details-form');
@@ -710,13 +1107,13 @@ const actions = {
     const values = {
       originCompany: 'West Coast Demo Warehouse', originContact: '演示提货联系人', originEmail: 'pickup@example.com', originPhone: '+1 213 555 0101',
       destinationCompany: 'Midwest Demo Receiving', destinationContact: '演示送货联系人', destinationEmail: 'delivery@example.com', destinationPhone: '+1 312 555 0102',
-      originReference: 'PU-DEMO-001', originNotes: '从西侧入口进入，抵达后联系仓库。', originOpensAt: '08:00', originClosesAt: '18:00',
+      originReference: 'PU-DEMO-001', originNotes: '从西侧入口进入，抵达后联系仓库。', originOpensAt: '09:00', originClosesAt: '17:00',
       destinationReference: 'DEL-DEMO-001', destinationNotes: '请到收货窗口登记。', destinationOpensAt: '09:00', destinationClosesAt: '17:00',
       pickupEnd: '17:00', commodity: '纸箱包装日用品'
     };
     for (const [name, value] of Object.entries(values)) {
       const field = form.querySelector('[name="' + name + '"]');
-      if (!field.value) field.value = value;
+      if (!field.value) setPhoneInputValue(field, value);
     }
     const quote = saveDetails(form);
     if (quote) updateSummary(quote);
@@ -770,11 +1167,12 @@ const actions = {
     dialog.close();
     draft = emptyShipment();
     units = currentState().profile.units;
-    notify('演示运单已生成 · ' + order.id);
+    notify(`演示下单成功，已模拟扣款 ${money(order.rate.total)}`);
     navigate('orders/' + order.id);
   },
   'choose-address'({ side }) {
-    const title = side === 'origin' ? '选择提货地址' : '选择送货地址';
+    const stopSide = document.getElementById(side)?.closest('[data-custom-stop]')?.dataset.side ?? side;
+    const title = stopSide === 'origin' ? '选择提货地址' : '选择送货地址';
     showDialog(title, '<ul class="address-book">' + addressRows(currentState().addresses, 'pick', side) + '</ul>');
   },
   'show-satellite'({ side }) {
@@ -794,10 +1192,14 @@ const actions = {
     if (!quick) {
       for (const [key, field] of Object.entries(addressContactFields)) {
         const control = input.form.elements[side + field];
-        if (address[key] && control) control.value = address[key];
+        if (address[key] && control) setPhoneInputValue(control, address[key]);
       }
-      const quote = saveDetails();
-      if (quote) updateSummary(quote);
+      if (input.form.id === 'custom-quote-form') {
+        updateCustomShipment(input.form);
+      } else {
+        const quote = saveDetails();
+        if (quote) updateSummary(quote);
+      }
     }
     dialog.close();
     input.focus();
@@ -820,6 +1222,20 @@ const actions = {
     workspace.querySelector('[data-action="new-address"]').focus();
     notify('地址已删除');
   },
+  'collect-rebill-early'({ bill: id }) {
+    const bill = billingRecords(currentState().orders).find(entry => entry.id === id && entry.originalId);
+    if (!bill || bill.paymentStatus !== 'scheduled') { render(); notify('该补收账单已扣款或正在申诉'); return; }
+    showDialog('提前确认扣款', `<div class="stack"><p>补收账单 <strong>${e(bill.id)}</strong></p><p>关联运单 ${e(bill.orderId)}</p><p>本次扣款金额 <strong>${money(bill.total)} USD</strong></p><p class="note">申诉截止时间：${e(bill.appealDeadline ? bill.appealDeadline + ' 00:00（PT）' : '待确认')}。确认后立即模拟扣款，并保留扣款记录。</p><p class="error" id="rebill-collection-error" role="alert"></p><div class="actions end"><button type="button" class="btn small" data-action="close-dialog">返回核对</button><button type="button" class="btn primary small" data-action="confirm-rebill-collection" data-bill="${e(bill.id)}" data-total="${bill.total}">确认扣款 ${money(bill.total)}</button></div></div>`);
+  },
+  'confirm-rebill-collection'({ bill, total }, button) {
+    button.disabled = true;
+    const result = collectRebillEarly(bill, Number(total));
+    if (result.error) { dialog.querySelector('#rebill-collection-error').textContent = result.error; button.disabled = false; return; }
+    dialog.close();
+    if (location.hash !== billHref(result.bill)) history.replaceState(null, '', billHref(result.bill));
+    render(); workspace.querySelector('#detail-title')?.focus({ preventScroll: true });
+    notify(result.alreadyCollected ? '该补收账单已扣款' : '已提前确认扣款（演示）');
+  },
   'download-bill'({ bill: id }) {
     downloadBill(billingRecords(currentState().orders).find(bill => bill.id === id));
   },
@@ -829,8 +1245,45 @@ const actions = {
     activateTab(detail, tab, detail.querySelector('.management-detail-scroll'));
   },
   'account-tab'({ tab }) {
+    if (!Object.hasOwn(accountTabs, tab)) return;
     activeAccountTab = tab;
-    activateTab(workspace.querySelector('.account-panel'), tab);
+    if (location.hash !== '#account/' + tab) history.replaceState(null, '', '#account/' + tab);
+    const panel = workspace.querySelector('.account-panel');
+    panel.classList.toggle('wallet-active', tab === 'balance');
+    if (tab === 'balance') refreshWalletAccount();
+    else { workspace.querySelector('.list-pagination')?.remove(); workspace.querySelector('#account-panel-balance').innerHTML = ''; }
+    activateTab(panel, tab);
+  },
+  'wallet-recharge'() {
+    walletRechargeDraft = { amount: '1000', note: '', token: crypto.randomUUID() };
+    showDialog('模拟充值', walletRechargeForm(walletRechargeDraft));
+  },
+  'wallet-amount'({ amount }) {
+    dialog.querySelector('[name="amount"]').value = amount;
+    dialog.querySelectorAll('[data-action="wallet-amount"]').forEach(button => button.setAttribute('aria-pressed', button.dataset.amount === amount));
+  },
+  'wallet-recharge-back'() {
+    if (walletRechargeDraft) showDialog('模拟充值', walletRechargeForm(walletRechargeDraft));
+  },
+  'wallet-recharge-confirm'(_, button) {
+    if (!walletRechargeDraft) return;
+    button.disabled = true;
+    const result = rechargeWallet(walletRechargeDraft);
+    if (result.error) { dialog.querySelector('#wallet-recharge-error').textContent = result.error; button.disabled = false; return; }
+    dialog.close(); walletRechargeDraft = undefined;
+    clearListFilters(filters.wallet); refreshWalletAccount();
+    workspace.querySelector('[data-action="wallet-recharge"]').focus({ preventScroll: true });
+    notify(result.alreadyRecharged ? '本次模拟充值已入账' : '模拟充值已入账 ' + money(result.entry.amount));
+  },
+  'wallet-export'() {
+    const { matches } = walletListing(currentState());
+    const amount = cents => (cents / 100).toFixed(2);
+    const rows = [['流水号', '日期（PT）', '类型', '摘要', '关联账单', '关联运单', '收入 (USD)', '支出 (USD)', '变动后余额 (USD)'],
+      ...matches.map(entry => [entry.id, entry.date, walletKinds[entry.kind], entry.description, entry.billId ?? '', entry.orderId ?? '', entry.amount > 0 ? amount(entry.amount) : '', entry.amount < 0 ? amount(-entry.amount) : '', amount(entry.balance)])];
+    const csv = rows.map(row => row.map(value => { const text = String(value); const safe = /^[=+@-]/.test(text) ? "'" + text : text; return '"' + safe.replaceAll('"','""') + '"'; }).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = '余额流水-' + dateInZone() + '.csv'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); notify('已导出当前筛选的资金流水');
   },
   'new-api-key'() { showDialog('创建演示 API 密钥', apiKeyForm()); },
   async 'copy-api-key'() {
@@ -862,22 +1315,36 @@ const actions = {
     Object.assign(filters[kind], { status, page: 1 });
     updateListFilters(kind);
   },
-  'billing-summary-filter'({ status }, button) {
-    const tools = button.closest('[data-filters]');
-    const { filters: kind } = tools.dataset;
-    Object.assign(filters[kind], { status, query: '', page: 1 });
-    tools.querySelector('input[type="search"]').value = '';
-    updateListFilters(kind);
-  },
-  'dashboard-due'({ kind }) {
-    Object.assign(filters[kind], { query: '', status: 'due', page: 1 });
-  },
   'view-campaign'({ id }) {
     const campaign = campaignDetails(id);
     if (campaign) showDialog(campaign.title, campaign.body);
   },
   'list-page'({ list, page }) {
     changeListPage(list, Number(page));
+  },
+  'edit-order'({ order: id }) {
+    const order = currentState().orders.find(entry => entry.id === id);
+    const [side] = editableOrderStops(order);
+    if (!side) return;
+    orderChangeDraft = { order, side, values: {}, cargo: { items: order.shipment.items, units } };
+    showOrderChangeEditor();
+  },
+  'cancel-order'({ order: id }) {
+    const order = currentState().orders.find(entry => entry.id === id);
+    if (canRequestOrderChange(order)) showDialog('申请取消订单', orderCancellationForm(order), 'order-change');
+  },
+  'order-change-side'({ side }) {
+    for (const button of dialog.querySelectorAll('[data-action="order-change-side"]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.side === side));
+    }
+    for (const form of dialog.querySelectorAll('[data-order-change-form]')) form.hidden = form.dataset.orderChangeForm !== side;
+    orderChangeDraft.side = side;
+  },
+  'back-order-change'() { showOrderChangeEditor(); },
+  'submit-order-change'() {
+    if (!orderChangeDraft?.plan) return;
+    const { order, plan } = orderChangeDraft;
+    sendOrderChange(order.id, plan);
   },
   'new-ticket'({ order: id }) {
     const { orders } = currentState();
@@ -914,19 +1381,23 @@ const actions = {
     }
   },
   'close-ticket'({ id }) {
-    showDialog('关闭记录', `<p>关闭后将结束这条记录的沟通。确认关闭吗？</p><div class="actions end"><button class="btn" type="button" data-action="close-dialog">取消</button><button class="btn primary" type="button" data-action="confirm-close-ticket" data-id="${e(id)}">确认关闭</button></div>`);
+    const ticket = currentState().tickets.find(entry => entry.id === id);
+    const cancelChange = Boolean(ticket?.orderChange || ticket?.customChange);
+    const title = cancelChange ? '撤回申请' : '关闭记录';
+    const message = cancelChange ? '撤回后将结束这次变更审核。' : '关闭后将结束这条记录的沟通。确认关闭吗？';
+    showDialog(title, `<p>${message}</p><div class="actions end"><button class="btn" type="button" data-action="close-dialog">取消</button><button class="btn primary" type="button" data-action="confirm-close-ticket" data-id="${e(id)}">${cancelChange ? '确认撤回' : '确认关闭'}</button></div>`);
   },
   'confirm-close-ticket'({ id }) {
     const ticket = updateTicket(id);
     dialog.close();
     if (ticket) {
       openTicket(ticket);
-      notify(caseTypes[caseKind(ticket)].label + '已关闭');
+      notify(ticket.orderChange || ticket.customChange ? '变更申请已撤回' : caseTypes[caseKind(ticket)].label + '已关闭');
     }
   },
-  'order-file'({ order: id, kind, mode }) {
+  'order-file'({ order: id, kind, mode, bill }) {
     const order = currentState().orders.find(order => order.id === id);
-    const file = orderDocument(order, kind);
+    const file = orderDocument(order, kind, bill);
     if (!file) return;
     const url = URL.createObjectURL(new Blob([file.html], { type: 'text/html;charset=utf-8' }));
     const link = document.createElement('a');
@@ -956,7 +1427,7 @@ function saveShipment() {
   }
   const quote = saveQuote(draft, draftId, assistantDetails);
   assistantDetails = {};
-  quickDrafts.delete(quickDraftKey(shipmentMode(draft), draftId));
+  quickDrafts.delete(draftKey);
   workspace.querySelector('#quote-form').dataset.submitted = 'true';
   draftId = quote.id;
   navigate('rates/' + quote.id);
@@ -965,6 +1436,21 @@ function saveShipment() {
 const textFields = form => Object.fromEntries(Array.from(new FormData(form), ([key, value]) => [key, value.trim()]));
 
 const submits = {
+  'cancel-order-form'(form) {
+    const order = currentState().orders.find(entry => entry.id === form.dataset.order);
+    if (order?.status !== form.dataset.status) {
+      form.querySelector('[data-order-change-error]').textContent = '运单状态已更新，请关闭后重新打开核对。';
+      return;
+    }
+    sendOrderChange(form.dataset.order, planOrderCancellation(order, form.elements.reason.value));
+  },
+  'dashboard-quote-form'(form) {
+    const { result, shipment } = analyzeAssistant(form, emptyShipment(form.elements.mode.value));
+    const panel = workspace.querySelector('#dashboard-quote-result');
+    panel.innerHTML = quoteAssistantResult(result, shipment, currentState().profile.units, true);
+    panel.hidden = false;
+    panel.scrollIntoView({ block: 'nearest' });
+  },
   'quote-assistant-form'(form) {
     const { result, shipment } = analyzeAssistant(form);
     const panel = dialog.querySelector('#quote-assistant-result');
@@ -1016,17 +1502,37 @@ const submits = {
     if (form.dataset.submitted) return;
     const { shipment, details, fields, units } = readCustomDraft(form);
     const error = form.querySelector('#custom-quote-error');
-    if (!shipment.origin || !shipment.destination || !fields.requirements || !fields.contact || !fields.email) {
+    const stops = [...shipment.stops.origin, ...shipment.stops.destination];
+    const scheduled = stops.filter(stop => stop.date);
+    const invalidDate = scheduled.find((stop, index) => index > 0 && stop.date < scheduled[index - 1].date);
+    const invalidCargo = shipment.items.findIndex(item => {
+      const route = customCargoRoute(item, shipment.stops);
+      return !route.originStopId || !route.destinationStopId;
+    });
+    if (stops.some(stop => !stop.address) || !fields.requirements || !fields.contact || !fields.email) {
       error.textContent = '请填写提送货地点、需求说明及联系方式。';
-    } else if (shipment.pickupDate && shipment.deliveryDate && shipment.deliveryDate < shipment.pickupDate) {
-      error.textContent = '期望送货日期不能早于提货日期。';
+    } else if (invalidDate) {
+      error.textContent = '期望交接日期应按路线先后排列，请检查各地点日期或调整地点顺序。';
+      form.elements['custom-' + invalidDate.id + 'Date'].focus();
+    } else if (invalidCargo >= 0) {
+      error.textContent = `请为货物 ${invalidCargo + 1} 选择有效的提货点和送货点。`;
+      const row = form.querySelectorAll('[data-cargo-row]')[invalidCargo];
+      row.querySelector('[data-cargo-route] select:invalid')?.focus();
     } else if (!cargoReady(shipment) || !hazardDeclarationsReady(shipment)) {
       error.textContent = '请检查货物尺寸、重量、件数和危险品申报。';
     } else {
-      const request = saveCustomRequest({ ...fields, shipment, details, units });
+      const requestId = form.dataset.request;
+      if (requestId) {
+        const result = submitCustomRequestChange(requestId, { ...fields, shipment, details, units }, customDraft.revision, form.elements.changeReason.value);
+        if (result.error) { error.textContent = result.error; return; }
+      }
+      const request = requestId ? { id: requestId } : saveCustomRequest({ ...fields, shipment, details, units });
       form.dataset.submitted = 'true';
+      customDrafts.delete(form.dataset.draftKey);
+      customDraftKey = '';
       customDraft = emptyCustomDraft();
       navigate('custom/' + request.id);
+      notify(requestId ? '修改工单已提交，等待客服审核' : '定制询价已提交');
     }
   },
   'details-form'(form) {
@@ -1050,6 +1556,14 @@ const submits = {
       return;
     }
     showConfirmation(quote);
+  },
+  'wallet-recharge-form'(form) {
+    if (!walletRechargeDraft) return;
+    const fields = new FormData(form);
+    const parsed = walletRechargeAmount(fields.get('amount'));
+    if (parsed.error) { form.querySelector('#wallet-recharge-error').textContent = parsed.error; return; }
+    walletRechargeDraft = { ...walletRechargeDraft, amount: String(fields.get('amount')), cents: parsed.cents, note: String(fields.get('note') ?? '').trim() };
+    showDialog('核对模拟充值', walletRechargeConfirmation(walletRechargeDraft, walletSnapshot().balance));
   },
   'profile-form'(form) {
     const profile = textFields(form);
@@ -1097,7 +1611,7 @@ document.addEventListener('click', event => {
   }
   const link = event.target.closest('a[href^="#"]');
   if (!link) return;
-  if (link.closest('.management-list') && link.hash === location.hash && innerWidth <= 1080) {
+  if (link.closest('.management-list') && link.hash === location.hash && workspaceScrolls()) {
     workspace.querySelector('#detail-title').focus({ preventScroll: true });
     workspace.querySelector('.management-detail').scrollIntoView();
   }
@@ -1132,6 +1646,11 @@ window.addEventListener('resize', hideServiceHelp);
 
 document.addEventListener('submit', event => {
   const form = event.target;
+  if (form.dataset.orderChangeForm) {
+    event.preventDefault();
+    reviewOrderChange(form);
+    return;
+  }
   if (!Object.hasOwn(submits, form.id)) return;
   event.preventDefault();
   submits[form.id](form);
@@ -1173,16 +1692,33 @@ dialog.addEventListener('change', event => {
 });
 
 dialog.addEventListener('input', event => {
+  const form = event.target.closest('[data-order-change-form], #cancel-order-form');
+  if (form) {
+    form.querySelector('[data-order-change-error]').textContent = '';
+    if (form.id === 'order-change-cargo') {
+      toggleHazmat(event.target);
+      if (event.target.closest('.cargo-row')) {
+        updateCargoMetrics({ items: readOrderChangeCargo(form) }, orderChangeDraft.cargo.units, form);
+      }
+    }
+    return;
+  }
   if (!event.target.matches('#quote-assistant-form textarea')) return;
   assistantDescriptions.set(location.hash, event.target.value);
   dialog.querySelector('#quote-assistant-result').hidden = true;
 });
 
 workspace.addEventListener('input', event => {
+  if (event.target.form?.id === 'dashboard-quote-form') {
+    dashboardAssistant[event.target.name] = event.target.value;
+    workspace.querySelector('#dashboard-quote-result').hidden = true;
+    return;
+  }
   const filterGroup = event.target.closest('[data-filters]');
   if (filterGroup) {
     const kind = filterGroup.dataset.filters;
-    Object.assign(filters[kind], { query: event.target.value, page: 1 });
+    const property = kind === 'wallet' && event.target.name === 'walletKind' ? 'status' : 'query';
+    Object.assign(filters[kind], { [property]: event.target.value, page: 1 });
     updateListFilters(kind);
   } else if (event.target.closest('#quote-form')) {
     workspace.querySelector('#quote-error').textContent = '';
@@ -1191,13 +1727,12 @@ workspace.addEventListener('input', event => {
     const form = input.form;
     form.querySelector('#custom-quote-error').textContent = '';
     toggleHazmat(input);
-    if (input.closest('.cargo-row')) {
-      const { shipment, units } = readCustomDraft(form);
-      updateCargoMetrics(shipment, units);
-    }
+    updateCustomShipment(form);
+    const stop = input.closest('[data-custom-stop]');
     if (input.name.endsWith('-services')) {
-      const shipment = readStops(new FormData(form));
-      input.closest('details').querySelector('[data-service-preview]').textContent = serviceSelectionText(shipment, input.name.split('-')[0]);
+      const { side, stopId } = stop.dataset;
+      const services = customDraft.shipment.stops[side].find(entry => entry.id === stopId).services;
+      input.closest('details').querySelector('[data-service-preview]').textContent = serviceSelectionText({ services: { [side]: services } }, side);
     }
   } else if (event.target.closest('#details-form')) {
     workspace.querySelector('#details-error').textContent = '';
@@ -1213,8 +1748,9 @@ workspace.addEventListener('input', event => {
 menuButton.addEventListener('click', () => setMenu(menuButton.getAttribute('aria-expanded') === 'false'));
 shade.addEventListener('click', () => { setMenu(false); menuButton.focus(); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && serviceHelpAnchor) hideServiceHelp();
-  if (event.key === 'Escape' && document.body.classList.contains('nav-open')) {
+  if (event.key !== 'Escape') return;
+  if (serviceHelpAnchor) hideServiceHelp();
+  if (document.body.classList.contains('nav-open')) {
     setMenu(false);
     menuButton.focus();
   }
@@ -1234,6 +1770,7 @@ workspace.addEventListener('keydown', event => {
 
 dialog.addEventListener('close', () => {
   if (dialog.querySelector('#api-key-value')) dialog.innerHTML = '';
+  if (dialog.dataset.mode === 'order-change' && !dialog.open) orderChangeDraft = undefined;
 });
 
 window.addEventListener('hashchange', () => {
@@ -1242,11 +1779,29 @@ window.addEventListener('hashchange', () => {
   const quickForm = workspace.querySelector('#quote-form');
   draft = readShipment();
   if (quickForm && !quickForm.dataset.submitted) {
-    quickDrafts.set(quickDraftKey(shipmentMode(draft), draftId), { shipment: draft, details: assistantDetails });
+    quickDrafts.set(draftKey, { shipment: draft, details: assistantDetails });
   }
   const customForm = workspace.querySelector('#custom-quote-form');
-  if (customForm && !customForm.dataset.submitted) customDraft = readCustomDraft(customForm);
-  render(true);
+  if (customForm && !customForm.dataset.submitted) {
+    customDraft = readCustomDraft(customForm);
+    customDrafts.set(customForm.dataset.draftKey, customDraft);
+  }
+  render(true)?.querySelectorAll('.management-detail-scroll, .table-row-selected').forEach(element => {
+    element.classList.add('record-arrival');
+  });
 });
+
+// Keep an open billing screen current when its PT collection date rolls over.
+let displayedBillingDate = dateInZone();
+function refreshBillingDate() {
+  const today = dateInZone();
+  if (today === displayedBillingDate || dialog.open) return;
+  displayedBillingDate = today;
+  if (currentRoute()[0] === 'billing') render();
+  else if (currentRoute()[0] === 'account' && activeAccountTab === 'balance') refreshWalletAccount();
+}
+setInterval(refreshBillingDate, 60000);
+window.addEventListener('focus', refreshBillingDate);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBillingDate(); });
 
 render();

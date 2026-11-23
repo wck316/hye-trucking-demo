@@ -1,11 +1,14 @@
 import {
-  billStatuses, carrierProfiles, displayAddress, invoiceId, itemCommodities, money, orderDocuments,
-  packaging, selectedServices, stopSupplement, totals
-} from './model.js?v=campaigns';
-import { e } from './views.js?v=dashboard-hero-first';
+  billStatusText, billAmountLabel, rebillCollectionRule, rebillCountdownText, rebillMethodText, carrierProfiles, displayAddress, billingRecords, itemCommodities, money, orderDocuments,
+  packaging, selectedServices, stopSupplement, totals, customShipmentStops, customCargoRoute
+} from './model.js?v=account-layout';
+import { e } from './views.js?v=account-layout';
 
 function stop(order, side, title, includeContact = true) {
   const details = order.details ?? {};
+  if (order.shipment.mode === 'custom' && order.shipment.stops) {
+    return customShipmentStops(order.shipment, details)[side].map((point, index) => `<section><h2>${title} ${index + 1}</h2><p>${e(point.address)}</p>${point.date ? `<p>${e(point.date)}</p>` : ''}${includeContact ? `<p>${e([point.contact, point.phone, point.phoneExtension && 'ext. ' + point.phoneExtension].filter(Boolean).join(' · '))}</p>${point.reference ? `<p>Ref. ${e(point.reference)}</p>` : ''}${point.notes ? `<p>${e(point.notes)}</p>` : ''}` : ''}</section>`).join('');
+  }
   const { reference, notes } = stopSupplement(details, side);
   const company = details[side + 'Company'];
   const phone = [details[side + 'Phone'], details[side + 'PhoneExtension'] && 'ext. ' + details[side + 'PhoneExtension']].filter(Boolean).join(' ');
@@ -19,10 +22,12 @@ function stop(order, side, title, includeContact = true) {
 function bol(order) {
   const items = order.shipment.items.map((item, index) => {
     const commodities = itemCommodities(item, index === 0 ? order.details?.commodity : '');
+    const route = order.shipment.stops && customCargoRoute(item, order.shipment.stops);
+    const routeLabel = route ? 'A' + (order.shipment.stops.origin.findIndex(stop => stop.id === route.originStopId) + 1) + ' → B' + (order.shipment.stops.destination.findIndex(stop => stop.id === route.destinationStopId) + 1) : '';
     const names = commodities.map(commodity => [commodity.description, commodity.nmfc && 'NMFC ' + commodity.nmfc,
       commodity.freightClass && 'Class ' + commodity.freightClass,
       commodity.regulated.includes('hazmat') && commodity.hazmat?.hazardId].filter(Boolean).join(' · ')).filter(Boolean);
-    return `<tr><td>${e(item.quantity)}</td><td>${e(packaging[item.type])}${names.map(name => `<small>${e(name)}</small>`).join('')}</td>
+    return `<tr><td>${e(item.quantity)}</td><td>${e(packaging[item.type])}${routeLabel ? `<small>${e(routeLabel)}</small>` : ''}${names.map(name => `<small>${e(name)}</small>`).join('')}</td>
       <td>${e([item.length, item.width, item.height].join(' × '))} in</td><td>${e(item.weight)} lb</td></tr>`;
   }).join('');
   const services = ['origin', 'destination'].flatMap(side => selectedServices(order.shipment, side)
@@ -37,21 +42,36 @@ function label(order) {
     <section><h2>装运件数</h2><p>${e(totals(order.shipment).quantity)} 件</p></section>`;
 }
 
-function invoice(order) {
-  const rows = [['运输费用', money(order.rate.freight)], ['附加服务', money(order.rate.accessorial)], ['合计 (USD)', money(order.rate.total)]];
-  return `<section><h2>${e(invoiceId(order))}</h2><p>出账日期 ${e(order.issued)} · ${e(billStatuses[order.billing])}</p></section>
-    <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${name}</th><td>${value}</td></tr>`).join('')}</tbody></table></section>`;
+function billDocument(bill) {
+  const rows = [...bill.charges, [billAmountLabel(bill) + ' (USD)', bill.total]];
+  const payment = bill.originalId ? `<p>出账日期 ${e(bill.issuedOn || '—')} · ${e(billStatusText(bill))}</p>
+    <p>${bill.paymentStatus === 'collected' ? '扣款日期 ' + e(bill.collectedOn || '—') : '申诉截止（PT）' + e(bill.appealDeadline ? bill.appealDeadline + ' 00:00' : '待确认')}</p>
+    <p>${e(rebillCountdownText(bill))}</p><p>扣款说明 ${e(rebillMethodText(bill))}</p>
+    <p class="muted">${e(rebillCollectionRule)}</p><p class="demo">演示账单流程 · 日期按 PT 计算</p>`
+    : `<p>扣款日期 ${e(bill.chargedOn || '—')} · ${e(billStatusText(bill))}</p>`;
+  return `<section><h2>${e(bill.id)}</h2>${payment}
+    ${bill.originalId ? `<p>原账单 ${e(bill.originalId)}</p>` : ''}</section>
+    <section><h2>费用明细</h2><table class="invoice"><tbody>${rows.map(([name, value]) => `<tr><th scope="row">${e(name)}</th><td>${money(value)}</td></tr>`).join('')}</tbody></table></section>
+    ${bill.reason ? `<section><h2>补收说明</h2><p class="muted">${e(bill.reason)}</p></section>` : ''}`;
 }
 
-const documentBodies = { bol, label, invoice };
+function pod(order) {
+  return `${stop(order, 'destination', '送货 · Consignee', false)}
+    <section><h2>回单记录</h2><p>回传日期 ${e(order.podReceived)}</p></section>`;
+}
 
-export function orderDocument(order, kind) {
-  if (!order || !Object.hasOwn(documentBodies, kind) || (kind === 'invoice' && !order.issued)) return null;
+const documentBodies = { bol, label, pod };
+
+export function orderDocument(order, kind, billId) {
+  if (!order || !Object.hasOwn(orderDocuments, kind) || (kind === 'pod' && !order.podReceived)) return null;
+  const billing = kind === 'invoice' || kind === 'rebill';
+  const bill = billing && billingRecords([order]).find(record => kind === 'invoice' ? !record.originalId : record.originalId && record.id === billId);
+  if (billing && !bill) return null;
   const [name, description] = orderDocuments[kind];
   const title = `${name} · ${description}`;
-  const carrier = carrierProfiles[order.rate.carrierId]?.name ?? '承运商未记录';
+  const carrier = carrierProfiles[order.rate.carrierId]?.name ?? order.rate.carrierName ?? '承运商未记录';
   return {
-    name: `${kind === 'invoice' ? invoiceId(order) : `${name}-${order.id}`}.html`,
+    name: `${bill ? bill.id : `${name}-${order.id}`}.html`,
     html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · ${e(order.id)}</title>
     <style>
       @page { size: ${kind === 'label' ? '4in 6in' : 'letter'}; margin: ${kind === 'label' ? '.2in' : '14mm'}; }
@@ -76,7 +96,7 @@ export function orderDocument(order, kind) {
       @media (max-width: 480px) { .stops { grid-template-columns: 1fr; gap: 0; } }
       @media print { body { margin: 0; padding: 0; max-width: none; } button { display: none; } .stops { grid-template-columns: repeat(2, minmax(0,1fr)); } }
     </style></head><body><button type="button" onclick="window.print()">打印 / 存为 PDF</button>
-    <header><p class="demo">HYE OMS · 演示文件</p><h1>${title}</h1><p>${e(order.id)} · ${e(carrier)}</p></header>
-    ${documentBodies[kind](order)}</body></html>`
+    <header><p class="demo">HYE Freight · 演示文件</p><h1>${title}</h1><p>${e(order.id)} · ${e(carrier)}</p></header>
+    ${bill ? billDocument(bill) : documentBodies[kind](order)}</body></html>`
   };
 }
